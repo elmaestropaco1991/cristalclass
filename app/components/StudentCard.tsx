@@ -1,4 +1,4 @@
-import Image from "next/image";
+import AvatarImage from "./AvatarImage";
 import type { Student } from "../types/student";
 
 type Props = {
@@ -13,8 +13,9 @@ export default function StudentCard({ alumno, onClick }: Props) {
       className="bg-white rounded-2xl shadow-lg p-6 hover:scale-105 transition"
     >
       <div className="flex flex-col items-center">
-        <Image
-          src={alumno.avatar}
+        <AvatarImage
+          avatar={alumno.avatar}
+          seed={alumno.id}
           alt={alumno.nombre}
           width={90}
           height={90}

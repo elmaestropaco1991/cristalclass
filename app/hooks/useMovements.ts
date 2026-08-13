@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 
 import type { Movement } from "../types/movement";
-import type { ActionType } from "../types/action";
+import { getActionType, type ActionType } from "../types/action";
 
 import { initialMovements } from "../data/movements";
 
@@ -19,12 +19,9 @@ import {
 import { getAction } from "../services/actionService";
 
 export function useMovements() {
-  const [movements, setMovements] = useState<Movement[]>([]);
-
-  useEffect(() => {
-    const almacenados = loadMovements();
-    setMovements(almacenados ?? initialMovements);
-  }, []);
+  const [movements, setMovements] = useState<Movement[]>(
+    () => loadMovements() ?? initialMovements
+  );
 
   useEffect(() => {
     saveMovements(movements);
@@ -32,20 +29,26 @@ export function useMovements() {
 
   function registrarMovimiento(
     studentId: string,
-    actionId: ActionType
+    actionId: ActionType,
+    requestedChange: number,
+    appliedChange: number
   ) {
     const action = getAction(actionId);
 
     if (!action) return;
 
-    setMovements((prev) =>
-      addMovement(prev, {
-        studentId,
-        points: action.points,
-        title: action.title,
-        type: action.type,
-      })
-    );
+    const updatedMovements = addMovement(movements, {
+      studentId,
+      actionId,
+      requestedChange,
+      appliedChange,
+      points: appliedChange,
+      title: action.title,
+      type: getActionType(action),
+    });
+
+    saveMovements(updatedMovements);
+    setMovements(updatedMovements);
   }
 
   function eliminarMovimiento(id: string) {

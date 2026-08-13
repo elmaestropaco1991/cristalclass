@@ -6,9 +6,10 @@ import { initialStudents } from "../data/students";
 import {
   addStudent,
   updateStudent,
-  updateCrystals,
+  applyCrystalChangeToStudent,
   deleteStudent,
 } from "../services/studentService";
+import type { CrystalUpdate } from "../services/studentService";
 
 import {
   loadStudents,
@@ -16,48 +17,55 @@ import {
 } from "../services/storageService";
 
 export function useStudents() {
-  const [alumnos, setAlumnos] = useState<Student[]>([]);
+  const [alumnos, setAlumnos] = useState<Student[]>(initialStudents);
   const [seleccionado, setSeleccionado] = useState<Student | null>(null);
+  const [hasHydratedStudents, setHasHydratedStudents] = useState(false);
 
   useEffect(() => {
-    const almacenados = loadStudents();
+    const hydrationFrame = requestAnimationFrame(() => {
+      const storedStudents = loadStudents();
+      if (storedStudents) setAlumnos(storedStudents);
+      setHasHydratedStudents(true);
+    });
 
-    if (almacenados) {
-      setAlumnos(almacenados);
-    } else {
-      setAlumnos(initialStudents);
-    }
+    return () => cancelAnimationFrame(hydrationFrame);
   }, []);
 
   useEffect(() => {
-    if (alumnos.length > 0) {
-      saveStudents(alumnos);
-    }
-  }, [alumnos]);
+    if (!hasHydratedStudents) return;
+    saveStudents(alumnos);
+  }, [alumnos, hasHydratedStudents]);
 
-  function modificarCristales(cambio: number) {
-    if (!seleccionado) return;
-
-    const nuevos = updateCrystals(
+  function modificarCristales(
+    alumnoId: string,
+    cambio: number
+  ): CrystalUpdate | undefined {
+    const { students: nuevos, change, generatedChests } = applyCrystalChangeToStudent(
       alumnos,
-      seleccionado.id,
+      alumnoId,
       cambio
     );
 
+    if (!change) return undefined;
+
+    saveStudents(nuevos);
     setAlumnos(nuevos);
 
     const actualizado = nuevos.find(
-      (a) => a.id === seleccionado.id
+      (a) => a.id === alumnoId
     );
 
-    if (actualizado) {
+    if (actualizado && seleccionado?.id === alumnoId) {
       setSeleccionado(actualizado);
     }
+
+    return { students: nuevos, change, generatedChests };
   }
 
   function guardarAlumno(alumno: Student) {
     if (alumno.id) {
       setAlumnos((prev) => updateStudent(prev, alumno));
+      if (seleccionado?.id === alumno.id) setSeleccionado(alumno);
     } else {
       setAlumnos((prev) => addStudent(prev, alumno));
     }

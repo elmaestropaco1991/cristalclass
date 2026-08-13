@@ -1,0 +1,102 @@
+.dust {
+  pointer-events: none;
+  position: absolute;
+  inset: 0;
+  overflow: visible;
+  opacity: 1;
+}
+
+.guide {
+  fill: none;
+  stroke-linecap: round;
+}
+
+.wideGuide {
+  stroke: url(#wide-dust);
+  stroke-width: 2.2;
+  stroke-dasharray: 2 16;
+  opacity: 0.3;
+}
+
+.sideGuide {
+  stroke: url(#side-dust);
+  stroke-width: 1.8;
+  stroke-dasharray: 1 13;
+  opacity: 0.25;
+}
+
+.lowGuide {
+  stroke: url(#low-dust);
+  stroke-width: 1.6;
+  stroke-dasharray: 2 18;
+  opacity: 0.2;
+}
+
+.particle {
+  position: absolute;
+  border-radius: 9999px;
+  box-shadow: 0 0 6px currentColor, 0 0 14px currentColor;
+  will-change: transform, opacity;
+}
+
+.gold {
+  background: #f6d77a;
+  color: #f6d77a;
+}
+
+.cream {
+  background: #fff1bd;
+  color: #fff1bd;
+}
+
+.white {
+  background: #fffaf0;
+  color: #fffaf0;
+}
+
+.amber {
+  background: #eebc55;
+  color: #eebc55;
+}
+
+.wide {
+  animation: wide-drift 23s ease-in-out infinite;
+}
+
+.side {
+  animation: side-drift 27s ease-in-out infinite;
+}
+
+.low {
+  animation: low-drift 19s ease-in-out infinite;
+}
+
+.loose {
+  animation: loose-drift 31s ease-in-out infinite;
+}
+
+@keyframes wide-drift {
+  0%, 100% { transform: translate3d(0, 0, 0); opacity: 0.64; }
+  48% { transform: translate3d(5px, -4px, 0); opacity: 0.8; }
+}
+
+@keyframes side-drift {
+  0%, 100% { transform: translate3d(0, 0, 0); opacity: 0.6; }
+  54% { transform: translate3d(-4px, 6px, 0); opacity: 0.76; }
+}
+
+@keyframes low-drift {
+  0%, 100% { transform: translate3d(0, 0, 0); opacity: 0.56; }
+  44% { transform: translate3d(7px, -3px, 0); opacity: 0.72; }
+}
+
+@keyframes loose-drift {
+  0%, 100% { transform: translate3d(0, 0, 0); opacity: 0.52; }
+  50% { transform: translate3d(3px, -6px, 0); opacity: 0.68; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .particle {
+    animation: none;
+  }
+}

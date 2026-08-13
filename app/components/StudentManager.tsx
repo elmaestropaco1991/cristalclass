@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import StudentForm from "./StudentForm";
+import AvatarImage from "./AvatarImage";
 import type { Student } from "../types/student";
 
 type Props = {
@@ -84,9 +85,12 @@ export default function StudentManager({
                   className="flex justify-between items-center p-4 border-b last:border-b-0 hover:bg-slate-50"
                 >
                   <div className="flex items-center gap-3">
-                    <img
-                      src={alumno.avatar}
+                    <AvatarImage
+                      avatar={alumno.avatar}
+                      seed={alumno.id}
                       alt={alumno.nombre}
+                      width={48}
+                      height={48}
                       className="w-12 h-12 rounded-full object-cover"
                     />
 

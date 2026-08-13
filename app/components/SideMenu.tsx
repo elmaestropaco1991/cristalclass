@@ -46,18 +46,22 @@ export default function SideMenu({
             👥 Gestionar alumnos
           </button>
 
+          {/* TODO: Conectar la gestión de clases cuando exista su vista. */}
           <button className="text-left p-4 rounded-xl hover:bg-slate-100 text-lg">
             🏫 Gestionar clases
           </button>
 
+          {/* TODO: Conectar el flujo de recompensas con cofres e inventario. */}
           <button className="text-left p-4 rounded-xl hover:bg-slate-100 text-lg">
             🎁 Recompensas
           </button>
 
+          {/* TODO: Implementar el panel de estadísticas. */}
           <button className="text-left p-4 rounded-xl hover:bg-slate-100 text-lg">
             📊 Estadísticas
           </button>
 
+          {/* TODO: Implementar las opciones de configuración. */}
           <button className="text-left p-4 rounded-xl hover:bg-slate-100 text-lg">
             ⚙️ Configuración
           </button>
