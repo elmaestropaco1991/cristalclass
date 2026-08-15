@@ -3,6 +3,8 @@
 import { useEffect, useState, type CSSProperties } from "react";
 
 import Header from "./components/Header";
+import AttendancePanel from "./components/AttendancePanel";
+import ClassroomContextNavigation from "./components/ClassroomContextNavigation";
 import MenuButton from "./components/MenuButton";
 import SideMenu from "./components/SideMenu";
 import StudentCard from "./components/StudentCard";
@@ -43,6 +45,7 @@ export default function Home() {
 
   const [menuAbierto, setMenuAbierto] = useState(false);
   const [gestorAlumnosAbierto, setGestorAlumnosAbierto] = useState(false);
+  const [asistenciaAbierta, setAsistenciaAbierta] = useState(false);
 
   useEffect(() => {
     preloadActionSounds();
@@ -87,6 +90,8 @@ export default function Home() {
         <div className="absolute -bottom-52 -right-32 h-[38rem] w-[38rem] rounded-full bg-cyan-400/25 blur-3xl" />
         <div className="absolute inset-0 opacity-40 [background-image:radial-gradient(circle_at_center,rgba(255,255,255,.9)_0_1px,transparent_1.5px)] [background-size:42px_42px]" />
       </div>
+
+      <ClassroomContextNavigation onOpenAttendance={() => setAsistenciaAbierta(true)} />
 
       <div className="relative mx-auto flex min-h-full w-full max-w-[1920px] flex-col px-4 pb-8 sm:px-6 lg:px-8">
         <header className="sticky top-0 z-40 flex shrink-0 items-center justify-between gap-4 border-b border-cyan-900/10 bg-[#edf7f8]/85 py-3 backdrop-blur-md sm:py-4">
@@ -143,6 +148,15 @@ export default function Home() {
         onGuardarAlumno={guardarAlumno}
         onEliminarAlumno={eliminarAlumno}
       />
+
+      {asistenciaAbierta && (
+        <AttendancePanel
+          key={classroomId}
+          classroomId={classroomId}
+          students={alumnos}
+          onClose={() => setAsistenciaAbierta(false)}
+        />
+      )}
 
       {seleccionado && (
         <StudentModal
