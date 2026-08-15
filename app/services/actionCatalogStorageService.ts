@@ -1,6 +1,11 @@
 import { actions } from "../data/actions";
 import type { Action, ActionVariant, QuickActionSlot } from "../types/action";
 import { isQuickActionSlot, normalizeActionCatalog } from "./actionCatalogService";
+import {
+  normalizeActionContext,
+  normalizeAttitudinalCriterionLinks,
+  normalizeOrdinaryComplianceTracking,
+} from "./actionSubjectService";
 
 const STORAGE_KEY = "cristalclass_actions";
 
@@ -13,7 +18,7 @@ const LEGACY_QUICK_SLOTS: Readonly<Record<string, QuickActionSlot>> = {
   disturbing: 6,
 };
 
-type StoredAction = {
+type StoredAction = Record<string, unknown> & {
   id?: unknown;
   title?: unknown;
   points?: unknown;
@@ -22,6 +27,10 @@ type StoredAction = {
   archived?: unknown;
   quickSlot?: unknown;
   orbit?: unknown;
+  subjectId?: unknown;
+  availableInAllSubjects?: unknown;
+  attitudinalCriterionLinks?: unknown;
+  trackOrdinaryCompliance?: unknown;
 };
 
 export function loadActionCatalog(): Action[] | null {
@@ -62,6 +71,10 @@ export function hydrateActionCatalog(value: unknown): Action[] {
   return catalog.length > 0 ? normalizeActionCatalog(catalog) : cloneDefaultCatalog();
 }
 
+/**
+ * Additive read-time migration. Stored data is not rewritten merely by loading;
+ * the normalized contract is persisted only on a later explicit catalog save.
+ */
 function hydrateAction(value: unknown): Action | null {
   if (!isRecord(value) || typeof value.id !== "string" || typeof value.title !== "string") {
     return null;
@@ -77,21 +90,34 @@ function hydrateAction(value: unknown): Action | null {
 
   const defaultAction = actions.find((action) => action.id === id);
   const archived = value.archived === true;
+  const context = normalizeActionContext(value);
   const quickSlot = archived
     ? null
     : hasOwn(value, "quickSlot")
       ? isQuickActionSlot(value.quickSlot) ? value.quickSlot : null
       : LEGACY_QUICK_SLOTS[id] ?? null;
+  const icon = typeof value.icon === "string" ? value.icon : defaultAction?.icon;
+  const iconId = typeof value.iconId === "string" ? value.iconId : undefined;
+  const orbit = hydrateOrbit(value.orbit)?.orbit ?? defaultAction?.orbit;
 
   return {
+    ...value,
     id,
     title,
     points,
-    ...(typeof value.icon === "string" ? { icon: value.icon } : defaultAction?.icon ? { icon: defaultAction.icon } : {}),
-    ...(typeof value.iconId === "string" ? { iconId: value.iconId } : {}),
+    icon,
+    iconId,
     archived,
     quickSlot,
-    ...(hydrateOrbit(value.orbit) ?? (defaultAction?.orbit ? { orbit: defaultAction.orbit } : {})),
+    orbit,
+    ...context,
+    attitudinalCriterionLinks: normalizeAttitudinalCriterionLinks(
+      value.attitudinalCriterionLinks
+    ),
+    trackOrdinaryCompliance: normalizeOrdinaryComplianceTracking(
+      points,
+      value.trackOrdinaryCompliance
+    ),
   };
 }
 
@@ -108,7 +134,11 @@ function hydrateOrbit(value: unknown): { orbit: { angle: number; variant: Action
 }
 
 function cloneDefaultCatalog(): Action[] {
-  return actions.map((action) => ({ ...action, ...(action.orbit ? { orbit: { ...action.orbit } } : {}) }));
+  return actions.map((action) => ({
+    ...action,
+    attitudinalCriterionLinks: action.attitudinalCriterionLinks.map((link) => ({ ...link })),
+    ...(action.orbit ? { orbit: { ...action.orbit } } : {}),
+  }));
 }
 
 function hasOwn(value: StoredAction, key: keyof StoredAction): boolean {

@@ -1,5 +1,6 @@
 import { actions } from "../data/actions";
 import type { Action } from "../types/action";
+import { GENERAL_SUBJECT_ID } from "../types/subject";
 import type { Movement } from "../types/movement";
 import {
   createActionApplicationGuard,
@@ -75,7 +76,18 @@ export async function runAdditionalActionsPanelDeterministicChecks(): Promise<
 }
 
 function additional(id: string, title: string, points: number): Action {
-  return { id, title, points, archived: false, quickSlot: null, icon: "✨" };
+  return {
+    id,
+    title,
+    points,
+    archived: false,
+    quickSlot: null,
+    icon: "✨",
+    subjectId: GENERAL_SUBJECT_ID,
+    availableInAllSubjects: false,
+    attitudinalCriterionLinks: [],
+    trackOrdinaryCompliance: false,
+  };
 }
 
 function movement(actionId: string, date: string): Movement {

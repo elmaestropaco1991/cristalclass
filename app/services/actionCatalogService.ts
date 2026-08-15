@@ -1,4 +1,17 @@
-import type { Action, ActionType, QuickActionSlot } from "../types/action";
+import type {
+  Action,
+  ActionType,
+  AttitudinalCriterionReference,
+  QuickActionSlot,
+} from "../types/action";
+import type { SubjectId } from "../types/subject";
+import {
+  normalizeActionContext,
+  normalizeAttitudinalCriterionLinks,
+  normalizeOrdinaryComplianceTracking,
+  validateActionSubjectContext,
+  validateOrdinaryComplianceTracking,
+} from "./actionSubjectService";
 
 export type CreateActionInput = {
   id: ActionType;
@@ -7,6 +20,10 @@ export type CreateActionInput = {
   icon?: string;
   iconId?: string;
   quickSlot?: QuickActionSlot | null;
+  subjectId?: SubjectId;
+  availableInAllSubjects?: boolean;
+  attitudinalCriterionLinks?: readonly AttitudinalCriterionReference[];
+  trackOrdinaryCompliance?: boolean;
 };
 
 export type UpdateActionConfigurationInput = {
@@ -15,6 +32,9 @@ export type UpdateActionConfigurationInput = {
   iconId?: string;
   quickSlot: QuickActionSlot | null;
   archived: boolean;
+  subjectId: SubjectId;
+  availableInAllSubjects: boolean;
+  trackOrdinaryCompliance: boolean;
 };
 
 export function getQuickActions(catalog: readonly Action[]): Action[] {
@@ -65,7 +85,16 @@ export function updateActionPoints(
   points: number
 ): Action[] {
   validatePoints(points);
-  return updateAction(catalog, actionId, (action) => ({ ...action, points }));
+  return updateAction(catalog, actionId, (action) => {
+    return {
+      ...action,
+      points,
+      trackOrdinaryCompliance: normalizeOrdinaryComplianceTracking(
+        points,
+        action.trackOrdinaryCompliance
+      ),
+    };
+  });
 }
 
 export function updateActionIcon(
@@ -141,6 +170,7 @@ export function updateActionConfiguration(
   if (!title) throw new Error("An action name is required.");
   validatePoints(input.points);
   if (input.quickSlot !== null) validateQuickSlot(input.quickSlot);
+  validateActionSubjectContext(input);
 
   const action = findAction(catalog, actionId);
   const nextAction: Action = {
@@ -150,7 +180,17 @@ export function updateActionConfiguration(
     ...(input.iconId === undefined ? {} : { iconId: input.iconId }),
     archived: input.archived,
     quickSlot: input.archived ? null : input.quickSlot,
+    subjectId: input.subjectId,
+    availableInAllSubjects: input.availableInAllSubjects,
+    trackOrdinaryCompliance: normalizeOrdinaryComplianceTracking(
+      input.points,
+      input.trackOrdinaryCompliance
+    ),
   };
+  validateOrdinaryComplianceTracking(
+    nextAction.points,
+    nextAction.trackOrdinaryCompliance
+  );
   const updatedCatalog = catalog.map((current) => current.id === actionId ? nextAction : current);
 
   return nextAction.archived
@@ -196,7 +236,21 @@ export function normalizeActionCatalog(catalog: readonly Action[]): Action[] {
       occupiedSlots.add(quickSlot);
     }
 
-    return { ...action, archived, quickSlot };
+    const context = normalizeActionContext(action);
+
+    return {
+      ...action,
+      archived,
+      quickSlot,
+      ...context,
+      attitudinalCriterionLinks: normalizeAttitudinalCriterionLinks(
+        action.attitudinalCriterionLinks
+      ),
+      trackOrdinaryCompliance: normalizeOrdinaryComplianceTracking(
+        action.points,
+        action.trackOrdinaryCompliance
+      ),
+    };
   });
 }
 
@@ -218,6 +272,11 @@ function createValidatedAction(input: CreateActionInput): Action {
     validateQuickSlot(input.quickSlot);
   }
 
+  const context = normalizeActionContext(input);
+  validateActionSubjectContext(context);
+  const trackOrdinaryCompliance = input.trackOrdinaryCompliance === true;
+  validateOrdinaryComplianceTracking(input.points, trackOrdinaryCompliance);
+
   return {
     id,
     title,
@@ -226,6 +285,11 @@ function createValidatedAction(input: CreateActionInput): Action {
     ...(input.iconId === undefined ? {} : { iconId: input.iconId }),
     archived: false,
     quickSlot: input.quickSlot ?? null,
+    ...context,
+    attitudinalCriterionLinks: normalizeAttitudinalCriterionLinks(
+      input.attitudinalCriterionLinks
+    ),
+    trackOrdinaryCompliance,
   };
 }
 

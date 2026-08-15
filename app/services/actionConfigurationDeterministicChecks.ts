@@ -1,6 +1,7 @@
 import { getActionIcon } from "../data/actionIcons";
 import type { Action } from "../types/action";
 import type { Movement } from "../types/movement";
+import { GENERAL_SUBJECT_ID } from "../types/subject";
 import { createActionApplicationGuard } from "./actionApplicationGuard";
 import { leaveAdditionalActionsMode, openActionConfiguration } from "./additionalActionsPanelMode";
 import {
@@ -19,7 +20,16 @@ export async function runActionConfigurationDeterministicChecks(): Promise<reado
   const catalog = [action("quick-one", "Primera", 1, 1), action("quick-two", "Segunda", 2, 2), action("additional", "Adicional", -3, null)];
   const positiveAdditional = createAction(catalog, { id: "positive-additional", title: "Positiva", points: 3, iconId: "learning-book" });
   const negativeAdditional = createAction(catalog, { id: "negative-additional", title: "Negativa", points: -3, iconId: "warnings-alert" });
-  const edited = updateActionConfiguration(catalog, "additional", { title: "Editada", points: -4, iconId: "participation-hand", quickSlot: null, archived: false });
+  const edited = updateActionConfiguration(catalog, "additional", {
+    title: "Editada",
+    points: -4,
+    iconId: "participation-hand",
+    quickSlot: null,
+    archived: false,
+    subjectId: GENERAL_SUBJECT_ID,
+    availableInAllSubjects: false,
+    trackOrdinaryCompliance: false,
+  });
   const emptyPosition = moveActionQuickSlot(catalog, "additional", 3);
   const occupiedPosition = moveActionQuickSlot(catalog, "additional", 1);
   const archived = archiveAction(catalog, "quick-one");
@@ -29,7 +39,20 @@ export async function runActionConfigurationDeterministicChecks(): Promise<reado
   let zeroRejected = false;
   let rejectedAtomically = false;
   try { createAction(catalog, { id: "zero", title: "Cero", points: 0 }); } catch { zeroRejected = true; }
-  try { updateActionConfiguration(catalog, "additional", { title: "", points: 4, iconId: "learning-book", quickSlot: null, archived: false }); } catch { rejectedAtomically = JSON.stringify(catalog) === unchanged; }
+  try {
+    updateActionConfiguration(catalog, "additional", {
+      title: "",
+      points: 4,
+      iconId: "learning-book",
+      quickSlot: null,
+      archived: false,
+      subjectId: GENERAL_SUBJECT_ID,
+      availableInAllSubjects: false,
+      trackOrdinaryCompliance: false,
+    });
+  } catch {
+    rejectedAtomically = JSON.stringify(catalog) === unchanged;
+  }
   const guard = createActionApplicationGuard();
   let creations = 0;
   const firstSave = guard.run(async () => { creations += 1; await Promise.resolve(); return true; });
@@ -59,7 +82,18 @@ export async function runActionConfigurationDeterministicChecks(): Promise<reado
 }
 
 function action(id: string, title: string, points: number, quickSlot: 1 | 2 | 3 | 4 | 5 | 6 | null, icon = "✨"): Action {
-  return { id, title, points, icon, archived: false, quickSlot };
+  return {
+    id,
+    title,
+    points,
+    icon,
+    archived: false,
+    quickSlot,
+    subjectId: GENERAL_SUBJECT_ID,
+    availableInAllSubjects: false,
+    attitudinalCriterionLinks: [],
+    trackOrdinaryCompliance: false,
+  };
 }
 
 function check(name: string, predicate: () => boolean): ActionConfigurationCheck {

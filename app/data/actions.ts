@@ -1,7 +1,16 @@
 import type { Action } from "../types/action";
+import { GENERAL_SUBJECT_ID } from "../types/subject";
+
+const GENERAL_ACTION_CONTEXT = {
+  subjectId: GENERAL_SUBJECT_ID,
+  availableInAllSubjects: false,
+  attitudinalCriterionLinks: [],
+  trackOrdinaryCompliance: false,
+} as const;
 
 export const actions: Action[] = [
   {
+    ...GENERAL_ACTION_CONTEXT,
     id: "weekly_challenge",
     title: "Reto semanal",
     points: 5,
@@ -15,6 +24,7 @@ export const actions: Action[] = [
   },
 
   {
+    ...GENERAL_ACTION_CONTEXT,
     id: "help_classmate",
     title: "Ayuda a un compañero",
     points: 3,
@@ -28,6 +38,7 @@ export const actions: Action[] = [
   },
 
   {
+    ...GENERAL_ACTION_CONTEXT,
     id: "correct_answer",
     title: "Acierto",
     points: 1,
@@ -41,6 +52,7 @@ export const actions: Action[] = [
   },
 
   {
+    ...GENERAL_ACTION_CONTEXT,
     id: "bring_material",
     title: "Trae el material",
     points: 1,
@@ -54,6 +66,7 @@ export const actions: Action[] = [
   },
 
   {
+    ...GENERAL_ACTION_CONTEXT,
     id: "talking",
     title: "Habla sin permiso",
     points: -1,
@@ -67,6 +80,7 @@ export const actions: Action[] = [
   },
 
   {
+    ...GENERAL_ACTION_CONTEXT,
     id: "disturbing",
     title: "Molesta",
     points: -3,
@@ -80,6 +94,7 @@ export const actions: Action[] = [
   },
 
   {
+    ...GENERAL_ACTION_CONTEXT,
     id: "disrespect",
     title: "Falta de respeto",
     points: -5,

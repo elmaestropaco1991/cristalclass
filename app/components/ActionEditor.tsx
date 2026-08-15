@@ -8,6 +8,7 @@ import {
   saveConfiguredAction,
 } from "../services/actionCatalogConfigurationService";
 import type { Action, QuickActionSlot } from "../types/action";
+import { GENERAL_SUBJECT_ID } from "../types/subject";
 import ActionIcon from "./ActionIcon";
 
 type Props = {
@@ -78,7 +79,18 @@ export default function ActionEditor({ action, catalog, onSaved, onCancel, onDir
 
     try {
       const nextCatalog = action
-        ? saveConfiguredAction(action.id, { title, points, iconId, quickSlot, archived: false })
+        ? saveConfiguredAction(action.id, {
+            title,
+            points,
+            iconId,
+            quickSlot,
+            archived: false,
+            subjectId: action.subjectId ?? GENERAL_SUBJECT_ID,
+            availableInAllSubjects: action.availableInAllSubjects ?? false,
+            trackOrdinaryCompliance: action.points < 0
+              ? action.trackOrdinaryCompliance ?? false
+              : false,
+          })
         : createConfiguredAction({ id: crypto.randomUUID(), title, points, iconId, quickSlot });
 
       onDirtyChange(false);

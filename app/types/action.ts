@@ -1,3 +1,5 @@
+import type { SubjectId } from "./subject";
+
 export type ActionType = string;
 
 export type QuickActionSlot = 1 | 2 | 3 | 4 | 5 | 6;
@@ -10,6 +12,17 @@ export type ActionVariant =
   | "danger"
   | "severe";
 
+/** Reference only: the official criterion catalog is introduced in a later phase. */
+export interface AttitudinalCriterionReference {
+  readonly criterionId: string;
+  readonly catalogVersion: string;
+}
+
+export interface ActionSubjectContext {
+  readonly subjectId: SubjectId;
+  readonly availableInAllSubjects: boolean;
+}
+
 export type Action = {
   id: ActionType;
   title: string;
@@ -18,6 +31,10 @@ export type Action = {
   iconId?: string;
   archived: boolean;
   quickSlot: QuickActionSlot | null;
+  subjectId: SubjectId;
+  availableInAllSubjects: boolean;
+  attitudinalCriterionLinks: readonly AttitudinalCriterionReference[];
+  trackOrdinaryCompliance: boolean;
 
   orbit?: {
     angle: number;
