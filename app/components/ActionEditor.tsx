@@ -7,8 +7,9 @@ import {
   createConfiguredAction,
   saveConfiguredAction,
 } from "../services/actionCatalogConfigurationService";
+import { getOrderedSubjectCatalog } from "../services/subjectCatalogService";
 import type { Action, QuickActionSlot } from "../types/action";
-import { GENERAL_SUBJECT_ID } from "../types/subject";
+import { GENERAL_SUBJECT_ID, type SubjectId } from "../types/subject";
 import ActionIcon from "./ActionIcon";
 
 type Props = {
@@ -29,6 +30,8 @@ const locations: readonly { value: QuickActionSlot | null; label: string }[] = [
   { value: 6, label: "Posición rápida 6" },
 ];
 
+const subjectOptions = getOrderedSubjectCatalog();
+
 export default function ActionEditor({ action, catalog, onSaved, onCancel, onDirtyChange }: Props) {
   const titleRef = useRef<HTMLHeadingElement>(null);
   const [title, setTitle] = useState(action?.title ?? "");
@@ -36,6 +39,13 @@ export default function ActionEditor({ action, catalog, onSaved, onCancel, onDir
   const [amount, setAmount] = useState(String(Math.abs(action?.points ?? 1)));
   const [quickSlot, setQuickSlot] = useState<QuickActionSlot | null>(action?.quickSlot ?? null);
   const [iconId, setIconId] = useState(action?.iconId ?? "other-sparkles");
+  const [subjectId, setSubjectId] = useState<SubjectId>(action?.subjectId ?? GENERAL_SUBJECT_ID);
+  const [availableInAllSubjects, setAvailableInAllSubjects] = useState(
+    action?.availableInAllSubjects ?? false
+  );
+  const [trackOrdinaryCompliance, setTrackOrdinaryCompliance] = useState(
+    action?.points && action.points < 0 ? action.trackOrdinaryCompliance : false
+  );
   const [iconPickerOpen, setIconPickerOpen] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState("");
@@ -54,8 +64,22 @@ export default function ActionEditor({ action, catalog, onSaved, onCancel, onDir
     amount: String(Math.abs(action?.points ?? 1)),
     quickSlot: action?.quickSlot ?? null,
     iconId: action?.iconId ?? "other-sparkles",
+    subjectId: action?.subjectId ?? GENERAL_SUBJECT_ID,
+    availableInAllSubjects: action?.availableInAllSubjects ?? false,
+    trackOrdinaryCompliance: action?.points && action.points < 0
+      ? action.trackOrdinaryCompliance
+      : false,
   }));
-  const isDirty = initialSnapshot !== serializeDraft({ title, kind, amount, quickSlot, iconId });
+  const isDirty = initialSnapshot !== serializeDraft({
+    title,
+    kind,
+    amount,
+    quickSlot,
+    iconId,
+    subjectId,
+    availableInAllSubjects,
+    trackOrdinaryCompliance,
+  });
 
   useEffect(() => {
     titleRef.current?.focus();
@@ -85,13 +109,20 @@ export default function ActionEditor({ action, catalog, onSaved, onCancel, onDir
             iconId,
             quickSlot,
             archived: false,
-            subjectId: action.subjectId ?? GENERAL_SUBJECT_ID,
-            availableInAllSubjects: action.availableInAllSubjects ?? false,
-            trackOrdinaryCompliance: action.points < 0
-              ? action.trackOrdinaryCompliance ?? false
-              : false,
+            subjectId,
+            availableInAllSubjects,
+            trackOrdinaryCompliance,
           })
-        : createConfiguredAction({ id: crypto.randomUUID(), title, points, iconId, quickSlot });
+        : createConfiguredAction({
+            id: crypto.randomUUID(),
+            title,
+            points,
+            iconId,
+            quickSlot,
+            subjectId,
+            availableInAllSubjects,
+            trackOrdinaryCompliance,
+          });
 
       onDirtyChange(false);
       onSaved(nextCatalog);
@@ -154,12 +185,35 @@ export default function ActionEditor({ action, catalog, onSaved, onCancel, onDir
       <fieldset className="grid gap-4 rounded-2xl bg-white/60 p-4 sm:grid-cols-2">
         <legend className="px-1 text-lg font-bold text-[#173d70]">Valor</legend>
         <div className="flex flex-wrap gap-2" role="group" aria-label="Tipo de acción">
-          {(["positive", "negative"] as const).map((option) => <button key={option} type="button" disabled={isSaving} onClick={() => setKind(option)} aria-pressed={kind === option} className={`rounded-xl px-4 py-3 font-bold disabled:opacity-60 focus-visible:outline-4 focus-visible:outline-cyan-400 ${kind === option ? "bg-[#173d70] text-white" : "bg-white text-[#173d70]"}`}>{option === "positive" ? "Positiva" : "Negativa"}</button>)}
+          {(["positive", "negative"] as const).map((option) => <button key={option} type="button" disabled={isSaving} onClick={() => { setKind(option); if (option === "positive") setTrackOrdinaryCompliance(false); }} aria-pressed={kind === option} className={`rounded-xl px-4 py-3 font-bold disabled:opacity-60 focus-visible:outline-4 focus-visible:outline-cyan-400 ${kind === option ? "bg-[#173d70] text-white" : "bg-white text-[#173d70]"}`}>{option === "positive" ? "Positiva" : "Negativa"}</button>)}
         </div>
         <label className="text-lg font-bold text-[#173d70]">Magnitud
           <input type="number" min="1" max="99" step="1" inputMode="numeric" value={amount} disabled={isSaving} onChange={(event) => setAmount(event.target.value)} className="mt-2 w-full rounded-xl border border-[#316386]/30 bg-white px-4 py-3 text-lg font-semibold outline-none focus:border-cyan-500 focus:ring-4 focus:ring-cyan-200 disabled:opacity-60" />
         </label>
       </fieldset>
+
+      <fieldset className="space-y-4 rounded-2xl border border-[#316386]/20 bg-white/60 p-4">
+        <legend className="px-1 text-lg font-bold text-[#173d70]">Asignatura y contexto</legend>
+        <label className="block text-lg font-bold text-[#173d70]">Asignatura
+          <select required value={subjectId} disabled={isSaving} onChange={(event) => setSubjectId(event.target.value as SubjectId)} className="mt-2 w-full rounded-xl border border-[#316386]/30 bg-white px-4 py-3 text-lg font-semibold outline-none focus:border-cyan-500 focus:ring-4 focus:ring-cyan-200 disabled:opacity-60">
+            {subjectOptions.map((subject) => <option key={subject.id} value={subject.id}>{subject.name}</option>)}
+          </select>
+        </label>
+        <label className="flex items-start gap-3 rounded-xl bg-white/80 p-3 text-[#173d70]">
+          <input type="checkbox" checked={availableInAllSubjects} disabled={isSaving} onChange={(event) => setAvailableInAllSubjects(event.target.checked)} className="mt-1 h-5 w-5 shrink-0 accent-cyan-600 focus-visible:outline-4 focus-visible:outline-cyan-400" />
+          <span><span className="block font-bold">Mostrar esta acción en todas las asignaturas</span><span className="mt-1 block text-sm font-semibold text-[#316386]">Úsalo solo para comportamientos que deban estar disponibles en cualquier materia.</span></span>
+        </label>
+      </fieldset>
+
+      {kind === "negative" && (
+        <fieldset className="space-y-3 rounded-2xl border border-[#316386]/20 bg-white/60 p-4">
+          <legend className="px-1 text-lg font-bold text-[#173d70]">Seguimiento de conducta ordinaria</legend>
+          <label className="flex items-start gap-3 rounded-xl bg-white/80 p-3 text-[#173d70]">
+            <input type="checkbox" checked={trackOrdinaryCompliance} disabled={isSaving} onChange={(event) => setTrackOrdinaryCompliance(event.target.checked)} className="mt-1 h-5 w-5 shrink-0 accent-cyan-600 focus-visible:outline-4 focus-visible:outline-cyan-400" />
+            <span><span className="block font-bold">Contabilizar las sesiones sin esta incidencia</span><span className="mt-1 block text-sm font-semibold text-[#316386]">Si el alumno está presente y no se registra esta conducta durante una sesión válida, CristalClass contará la sesión como cumplimiento ordinario. No concede cristales.</span></span>
+          </label>
+        </fieldset>
+      )}
 
       <label className="block text-lg font-bold text-[#173d70]">Ubicación
         <select value={quickSlot ?? "additional"} disabled={isSaving} onChange={(event) => setQuickSlot(event.target.value === "additional" ? null : Number(event.target.value) as QuickActionSlot)} className="mt-2 w-full rounded-xl border border-[#316386]/30 bg-white px-4 py-3 text-lg font-semibold outline-none focus:border-cyan-500 focus:ring-4 focus:ring-cyan-200 disabled:opacity-60">

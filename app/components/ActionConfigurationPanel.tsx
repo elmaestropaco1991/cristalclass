@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { restoreConfiguredAction } from "../services/actionCatalogConfigurationService";
 import { getAdditionalActions, getArchivedActions, getQuickActions } from "../services/actionCatalogService";
+import { getSubjectDefinition } from "../services/subjectCatalogService";
 import type { Action, QuickActionSlot } from "../types/action";
 import ActionEditor from "./ActionEditor";
 import ActionIcon from "./ActionIcon";
@@ -71,7 +72,7 @@ export default function ActionConfigurationPanel({ catalog, onCatalogChange, onD
       <details className="rounded-2xl border border-[#316386]/20 bg-white/55 p-4">
         <summary className="cursor-pointer text-xl font-bold text-[#173d70]">Archivadas ({archivedActions.length})</summary>
         <div className="mt-4 grid gap-3 sm:grid-cols-2">
-          {archivedActions.length === 0 ? <p className="font-semibold text-[#316386]">No hay acciones archivadas.</p> : archivedActions.map((action) => <div key={action.id} className="flex items-center justify-between gap-3 rounded-xl bg-white p-3"><span className="flex min-w-0 items-center gap-3"><ActionIcon icon={action.icon} iconId={action.iconId} /><span className="min-w-0"><span className="block truncate font-bold text-[#173d70]">{action.title}</span><PointsLabel points={action.points} /></span></span><button type="button" onClick={() => restore(action)} className="shrink-0 rounded-xl bg-cyan-600 px-3 py-2 font-bold text-white focus-visible:outline-4 focus-visible:outline-cyan-400">Restaurar</button></div>)}
+          {archivedActions.length === 0 ? <p className="font-semibold text-[#316386]">No hay acciones archivadas.</p> : archivedActions.map((action) => <div key={action.id} className="flex items-center justify-between gap-3 rounded-xl bg-white p-3"><span className="flex min-w-0 items-center gap-3"><ActionIcon icon={action.icon} iconId={action.iconId} /><span className="min-w-0"><span className="block truncate font-bold text-[#173d70]">{action.title}</span><PointsLabel points={action.points} /><ActionMetadata action={action} /></span></span><button type="button" onClick={() => restore(action)} className="shrink-0 rounded-xl bg-cyan-600 px-3 py-2 font-bold text-white focus-visible:outline-4 focus-visible:outline-cyan-400">Restaurar</button></div>)}
         </div>
       </details>
     </section>
@@ -79,7 +80,7 @@ export default function ActionConfigurationPanel({ catalog, onCatalogChange, onD
 }
 
 function QuickSlotSummary({ slot, action }: { slot: QuickActionSlot; action?: Action }) {
-  return <div className="min-h-28 rounded-2xl border border-[#316386]/20 bg-white/65 p-4"><p className="text-sm font-bold uppercase tracking-wide text-[#316386]">Posición {slot}</p>{action ? <div className="mt-2 flex items-center gap-3"><span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-cyan-50"><ActionIcon icon={action.icon} iconId={action.iconId} /></span><span className="min-w-0"><span className="block truncate font-bold text-[#173d70]">{action.title}</span><PointsLabel points={action.points} /></span></div> : <p className="mt-3 font-semibold text-[#316386]">Vacía</p>}</div>;
+  return <div className="min-h-28 rounded-2xl border border-[#316386]/20 bg-white/65 p-4"><p className="text-sm font-bold uppercase tracking-wide text-[#316386]">Posición {slot}</p>{action ? <div className="mt-2 flex items-center gap-3"><span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-cyan-50"><ActionIcon icon={action.icon} iconId={action.iconId} /></span><span className="min-w-0"><span className="block truncate font-bold text-[#173d70]">{action.title}</span><PointsLabel points={action.points} /><ActionMetadata action={action} /></span></div> : <p className="mt-3 font-semibold text-[#316386]">Vacía</p>}</div>;
 }
 
 function ActionList({ title, actions, onEdit, emptyMessage }: { title: string; actions: readonly Action[]; onEdit: (action: Action) => void; emptyMessage?: string }) {
@@ -88,9 +89,18 @@ function ActionList({ title, actions, onEdit, emptyMessage }: { title: string; a
 
 function ActionRow({ action, onEdit }: { action: Action; onEdit: () => void }) {
   const location = action.quickSlot === null ? "Más acciones" : `Rápida · posición ${action.quickSlot}`;
-  return <div className="flex min-h-24 items-center gap-3 rounded-2xl border border-[#316386]/20 bg-white p-4 shadow-sm"><span className="flex h-14 w-14 shrink-0 items-center justify-center rounded-xl bg-cyan-50"><ActionIcon icon={action.icon} iconId={action.iconId} /></span><span className="min-w-0 flex-1"><span className="block truncate text-lg font-bold text-[#173d70]">{action.title}</span><PointsLabel points={action.points} /><span className="block text-sm font-semibold text-[#316386]">{location}</span></span><button type="button" onClick={onEdit} className="shrink-0 rounded-xl bg-[#173d70] px-3 py-2 font-bold text-white focus-visible:outline-4 focus-visible:outline-cyan-400">Editar</button></div>;
+  return <div className="flex min-h-24 items-center gap-3 rounded-2xl border border-[#316386]/20 bg-white p-4 shadow-sm"><span className="flex h-14 w-14 shrink-0 items-center justify-center rounded-xl bg-cyan-50"><ActionIcon icon={action.icon} iconId={action.iconId} /></span><span className="min-w-0 flex-1"><span className="block truncate text-lg font-bold text-[#173d70]">{action.title}</span><PointsLabel points={action.points} /><span className="block text-sm font-semibold text-[#316386]">{location}</span><ActionMetadata action={action} /></span><button type="button" onClick={onEdit} className="shrink-0 rounded-xl bg-[#173d70] px-3 py-2 font-bold text-white focus-visible:outline-4 focus-visible:outline-cyan-400">Editar</button></div>;
 }
 
 function PointsLabel({ points }: { points: number }) {
   return <span className={`block font-bold ${points > 0 ? "text-emerald-700" : "text-rose-700"}`}>{points > 0 ? `+${points}` : points} cristales</span>;
+}
+
+function ActionMetadata({ action }: { action: Action }) {
+  const labels = [getSubjectDefinition(action.subjectId).name];
+
+  if (action.availableInAllSubjects) labels.push("Todas las asignaturas");
+  if (action.trackOrdinaryCompliance) labels.push("Seguimiento ordinario");
+
+  return <span aria-label={`Contexto: ${labels.join(", ")}`} className="mt-1 block text-xs font-bold text-cyan-800">{labels.join(" · ")}</span>;
 }
