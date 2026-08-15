@@ -1,4 +1,5 @@
 import type { CSSProperties } from "react";
+import Image from "next/image";
 import type { Student } from "../types/student";
 import EquippedAvatar from "./EquippedAvatar";
 
@@ -15,9 +16,15 @@ export default function StudentCard({
   loadGuardianEagerly = false,
   guardianScale,
 }: Props) {
+  const pendingChestCount = alumno.chests.filter(
+    (chest) => chest.status === "pending" || chest.status === "closed"
+  ).length;
   const appearanceStyle = {
     "--guardian-scale": guardianScale / 100,
     "--guardian-scale-mobile": Math.min(guardianScale, 120) / 100,
+    "--pending-chest-size": `${guardianScale <= 100
+       ? 10 + guardianScale * 0.07
+       : 9.5 + guardianScale * 0.075}px`,
   } as CSSProperties;
   const isOverviewScale = guardianScale <= 60;
 
@@ -59,6 +66,26 @@ export default function StudentCard({
             <span aria-hidden="true">💎</span>
             {alumno.cristales}
           </p>
+          {pendingChestCount > 0 && (
+            <span
+              role="img"
+              aria-label="Tiene cofres pendientes"
+              className="pointer-events-none flex h-[var(--pending-chest-size)] w-[var(--pending-chest-size)] items-center justify-center"
+              style={{ background: "transparent", border: 0, boxShadow: "none", outline: "none" }}
+            >
+              <Image
+                src="/assets/chests/cristalclass-chest-ui-icon.png"
+                alt=""
+                aria-hidden="true"
+                width={20}
+                height={20}
+                sizes="20px"
+                unoptimized
+                className="h-full w-full object-contain"
+                style={{ background: "transparent", border: 0, boxShadow: "none", filter: "none", outline: "none" }}
+              />
+            </span>
+          )}
         </div>
       </div>
     </button>

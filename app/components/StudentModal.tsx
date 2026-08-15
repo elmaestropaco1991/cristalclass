@@ -1,6 +1,8 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { flushSync } from "react-dom";
+import Image from "next/image";
 import {
   createActionApplicationGuard,
   shouldCloseAfterActionApplication,
@@ -18,6 +20,10 @@ import type { ItemCategory } from "../../domain";
 import AdditionalActionsPanel from "./AdditionalActionsPanel";
 import ActionOrbit from "./ActionOrbit";
 import AvatarArena from "./AvatarArena";
+import ChestOpeningVideo, {
+  preloadChestOpeningVideo,
+  type ChestOpeningVideoHandle,
+} from "./ChestOpeningVideo";
 import StudentCollectionScreen from "./StudentCollectionScreen";
 import StudentChestScreen from "./StudentChestScreen";
 import StudentInfo from "./StudentInfo";
@@ -28,15 +34,18 @@ type Props = {
   alumno: Student;
   movements: readonly Movement[];
   soundEnabled: boolean;
+  onSoundEnabledChange: (enabled: boolean) => void;
   onCerrar: () => void;
   onAccion: (actionId: ActionType) => Promise<boolean>;
   onStudentUpdated: (student: Student) => void;
 };
 
-export default function StudentModal({ alumno, movements, soundEnabled, onCerrar, onAccion, onStudentUpdated }: Props) {
+export default function StudentModal({ alumno, movements, soundEnabled, onSoundEnabledChange, onCerrar, onAccion, onStudentUpdated }: Props) {
   const [additionalActionsOpen, setAdditionalActionsOpen] = useState(false);
   const [coleccionAbierta, setColeccionAbierta] = useState(false);
   const [cofreAbierto, setCofreAbierto] = useState(false);
+  const [chestOpeningVideoOpen, setChestOpeningVideoOpen] = useState(false);
+  const [chestFlowActive, setChestFlowActive] = useState(false);
   const [lastCollectionCategory, setLastCollectionCategory] = useState<ItemCategory | null>(null);
   const [isApplyingAction, setIsApplyingAction] = useState(false);
   const [actionError, setActionError] = useState(false);
@@ -45,9 +54,32 @@ export default function StudentModal({ alumno, movements, soundEnabled, onCerrar
   const pendingChestCount = alumno.chests.filter(
     (chest) => chest.status === "pending" || chest.status === "closed"
   ).length;
+  const chestFlowGuardRef = useRef(false);
+  const chestOpeningVideoRef = useRef<ChestOpeningVideoHandle>(null);
+
+  useEffect(() => {
+    if (pendingChestCount > 0) preloadChestOpeningVideo();
+  }, [pendingChestCount]);
 
   const handleClose = () => {
     if (!actionGuardRef.current.isProcessing) onCerrar();
+  };
+
+  const startChestOpening = () => {
+    if (chestFlowGuardRef.current || !chestOpeningVideoRef.current) return;
+
+    chestFlowGuardRef.current = true;
+    flushSync(() => {
+      setChestFlowActive(true);
+      setChestOpeningVideoOpen(true);
+    });
+    chestOpeningVideoRef.current.startPlayback();
+  };
+
+  const closeChestScreen = () => {
+    setCofreAbierto(false);
+    setChestFlowActive(false);
+    chestFlowGuardRef.current = false;
   };
 
   const handleAction = async (actionId: ActionType): Promise<boolean> => {
@@ -103,15 +135,25 @@ export default function StudentModal({ alumno, movements, soundEnabled, onCerrar
           ×
         </button>
 
-        {pendingChestCount > 0 && (
+        {pendingChestCount > 0 && !chestFlowActive && (
           <button
             type="button"
-            onClick={() => setCofreAbierto(true)}
+            onClick={startChestOpening}
             aria-label={`Abrir cofre de ${alumno.nombre}`}
             className="absolute bottom-[13%] left-[4.5%] z-30 flex items-center gap-2.5 text-left text-[#173d70] transition active:scale-[.98] motion-reduce:transition-none focus-visible:outline-4 focus-visible:outline-cyan-400"
           >
-            <span className={`relative flex h-[clamp(2.8rem,4.3vw,4.2rem)] w-[clamp(2.8rem,4.3vw,4.2rem)] shrink-0 items-center justify-center rounded-full border-2 ${studentProfileVisuals.magicControl}`}>
-              <ChestIcon />
+            <span className={`relative flex h-[clamp(2.45rem,3.8vw,3.7rem)] w-[clamp(2.45rem,3.8vw,3.7rem)] shrink-0 items-center justify-center rounded-full border-2 ${studentProfileVisuals.magicControl}`}>
+              <Image
+                src="/assets/chests/cristalclass-chest-ui-icon.png"
+                alt=""
+                aria-hidden="true"
+                width={28}
+                height={28}
+                sizes="28px"
+                unoptimized
+                className="h-[clamp(1.5rem,2.1vw,1.75rem)] w-[clamp(1.5rem,2.1vw,1.75rem)] object-contain"
+                style={{ background: "transparent", border: 0, boxShadow: "none", filter: "none", outline: "none" }}
+              />
               <span className="absolute -right-2 -top-2 flex h-7 min-w-7 items-center justify-center rounded-full bg-amber-300 px-1 text-sm font-black text-slate-950">
                 {pendingChestCount}
               </span>
@@ -181,10 +223,21 @@ export default function StudentModal({ alumno, movements, soundEnabled, onCerrar
           <StudentChestScreen
             student={alumno}
             onStudentUpdated={onStudentUpdated}
-            onClose={() => setCofreAbierto(false)}
+            onClose={closeChestScreen}
           />
         )}
       </section>
+
+      {pendingChestCount > 0 && (
+        <ChestOpeningVideo
+          ref={chestOpeningVideoRef}
+          isOpen={chestOpeningVideoOpen}
+          soundEnabled={soundEnabled}
+          onSoundEnabledChange={onSoundEnabledChange}
+          onReveal={() => setCofreAbierto(true)}
+          onFinished={() => setChestOpeningVideoOpen(false)}
+        />
+      )}
     </div>
   );
 }

@@ -32,7 +32,7 @@ export default function Home() {
   } = useStudents();
 
   const { movements, registrarMovimiento } = useMovements();
-  const { soundEnabled, toggleSound } = useSoundPreference();
+  const { soundEnabled, setSoundEnabled, toggleSound } = useSoundPreference();
   const classroomId = resolveClassroomId(alumnos);
   const { guardianScale, setGuardianScale, resetGuardianScale } = useClassroomGuardianScale(
     classroomId
@@ -163,6 +163,7 @@ export default function Home() {
           alumno={seleccionado}
           movements={movements}
           soundEnabled={soundEnabled}
+          onSoundEnabledChange={setSoundEnabled}
           onCerrar={() => setSeleccionado(null)}
           onAccion={ejecutarAccion}
           onStudentUpdated={guardarAlumno}
