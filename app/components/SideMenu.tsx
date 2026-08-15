@@ -2,12 +2,18 @@ type Props = {
   abierto: boolean;
   onCerrar: () => void;
   onGestionarAlumnos: () => void;
+  guardianScale: number;
+  onGuardianScaleChange: (guardianScale: number) => void;
+  onGuardianScaleReset: () => void;
 };
 
 export default function SideMenu({
   abierto,
   onCerrar,
   onGestionarAlumnos,
+  guardianScale,
+  onGuardianScaleChange,
+  onGuardianScaleReset,
 }: Props) {
   return (
     <>
@@ -65,6 +71,43 @@ export default function SideMenu({
           <button className="text-left p-4 rounded-xl hover:bg-slate-100 text-lg">
             ⚙️ Configuración
           </button>
+
+          <section aria-labelledby="classroom-appearance-title" className="mt-3 rounded-2xl border border-cyan-900/10 bg-cyan-50/80 p-4">
+            <h3 id="classroom-appearance-title" className="text-base font-black text-[#173d70]">
+              Apariencia del aula
+            </h3>
+            <div className="mt-4 flex items-center justify-between gap-3">
+              <label htmlFor="guardian-scale" className="text-sm font-bold text-slate-700">
+                Tamaño de los guardianes
+              </label>
+              <output htmlFor="guardian-scale" className="rounded-full bg-white px-2.5 py-1 text-sm font-black text-cyan-800 shadow-sm">
+                {guardianScale}%
+              </output>
+            </div>
+            <input
+              id="guardian-scale"
+              type="range"
+              min="50"
+              max="140"
+              step="10"
+              value={guardianScale}
+              onChange={(event) => onGuardianScaleChange(Number(event.target.value))}
+              aria-valuetext={`${guardianScale}%`}
+              className="mt-3 h-3 w-full cursor-pointer accent-cyan-700"
+            />
+            <div className="mt-1 flex justify-between text-xs font-bold text-slate-500">
+              <span>Vista general</span>
+              <span>Grande</span>
+            </div>
+            <button
+              type="button"
+              onClick={onGuardianScaleReset}
+              disabled={guardianScale === 100}
+              className="mt-4 rounded-xl border border-cyan-800/20 bg-white px-3 py-2 text-sm font-black text-[#173d70] transition hover:bg-cyan-100 disabled:cursor-default disabled:opacity-50 focus-visible:outline-4 focus-visible:outline-cyan-500"
+            >
+              Restablecer
+            </button>
+          </section>
 
         </nav>
       </aside>

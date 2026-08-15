@@ -13,9 +13,15 @@ type Props = {
   student: Student;
   className: string;
   avatarClassName?: string;
+  imageLoading?: "lazy" | "eager";
 };
 
-export default function EquippedAvatar({ student, className, avatarClassName = "" }: Props) {
+export default function EquippedAvatar({
+  student,
+  className,
+  avatarClassName = "",
+  imageLoading,
+}: Props) {
   const hasSelectedDragon = student.equipment?.companion === "green-crystal-dragon";
   const progression = calculateStudentProgression({
     crystals: student.cristales,
@@ -47,6 +53,7 @@ export default function EquippedAvatar({ student, className, avatarClassName = "
         alt={student.nombre}
         fill
         sizes="(max-width: 1024px) 72vw, 490px"
+        loading={imageLoading}
         unoptimized
         className={`pointer-events-none absolute inset-0 z-10 h-full w-full object-contain object-bottom ${avatarClassName}`}
         style={{ transform: `scale(${fullBodyAvatar.visualScale})` }}
