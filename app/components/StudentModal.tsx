@@ -35,12 +35,14 @@ type Props = {
   movements: readonly Movement[];
   soundEnabled: boolean;
   onSoundEnabledChange: (enabled: boolean) => void;
+  actionsDisabled: boolean;
+  studentIsAbsent: boolean;
   onCerrar: () => void;
   onAccion: (actionId: ActionType) => Promise<boolean>;
   onStudentUpdated: (student: Student) => void;
 };
 
-export default function StudentModal({ alumno, movements, soundEnabled, onSoundEnabledChange, onCerrar, onAccion, onStudentUpdated }: Props) {
+export default function StudentModal({ alumno, movements, soundEnabled, onSoundEnabledChange, actionsDisabled, studentIsAbsent, onCerrar, onAccion, onStudentUpdated }: Props) {
   const [additionalActionsOpen, setAdditionalActionsOpen] = useState(false);
   const [coleccionAbierta, setColeccionAbierta] = useState(false);
   const [cofreAbierto, setCofreAbierto] = useState(false);
@@ -83,7 +85,7 @@ export default function StudentModal({ alumno, movements, soundEnabled, onSoundE
   };
 
   const handleAction = async (actionId: ActionType): Promise<boolean> => {
-    if (actionGuardRef.current.isProcessing) return false;
+    if (actionsDisabled || actionGuardRef.current.isProcessing) return false;
 
     const actionPoints = actionCatalog.find((action) => action.id === actionId)?.points ?? 0;
     if (soundEnabled && actionPoints !== 0) prepareActionAudio();
@@ -125,6 +127,9 @@ export default function StudentModal({ alumno, movements, soundEnabled, onSoundE
         <span aria-live="assertive" className="sr-only">
           {actionError ? "No se pudo aplicar la acción." : ""}
         </span>
+        <span aria-live="polite" className="sr-only">
+          {studentIsAbsent ? "Alumno ausente. Las acciones de cristales están deshabilitadas." : ""}
+        </span>
 
         <button
           type="button"
@@ -164,7 +169,7 @@ export default function StudentModal({ alumno, movements, soundEnabled, onSoundE
 
         <div className="absolute left-1/2 top-[52%] h-[700px] w-[700px] -translate-x-1/2 -translate-y-1/2 scale-[0.58] sm:scale-[0.7] lg:scale-[0.76] xl:scale-[0.8] 2xl:top-[47%] 2xl:scale-100">
           <AvatarArena student={alumno} />
-          <ActionOrbit onAccion={handleAction} disabled={isApplyingAction} actions={actionCatalog} />
+          <ActionOrbit onAccion={handleAction} disabled={isApplyingAction || actionsDisabled} actions={actionCatalog} />
         </div>
 
         <button
@@ -203,6 +208,8 @@ export default function StudentModal({ alumno, movements, soundEnabled, onSoundE
             catalog={actionCatalog}
             isApplyingAction={isApplyingAction}
             actionError={actionError}
+            actionsDisabled={actionsDisabled}
+            studentIsAbsent={studentIsAbsent}
             onApplyAction={handleAction}
             onCatalogChange={setActionCatalog}
             onBack={() => setAdditionalActionsOpen(false)}

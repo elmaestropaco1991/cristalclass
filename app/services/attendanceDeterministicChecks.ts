@@ -14,6 +14,10 @@ import {
 } from "./attendanceStorageService";
 import { runActionContextConfigurationDeterministicChecks } from "./actionContextConfigurationDeterministicChecks";
 import { runSubjectActionCatalogDeterministicChecks } from "./subjectActionCatalogDeterministicChecks";
+import {
+  canApplyStudentActionToday,
+  executeStudentActionIfPresent,
+} from "./studentActionAttendanceGuard";
 
 export type AttendanceDeterministicCheck = {
   readonly name: string;
@@ -104,6 +108,28 @@ export async function runAttendanceDeterministicChecks(): Promise<
   );
   const phase1Checks = await runSubjectActionCatalogDeterministicChecks();
   const phase2Checks = runActionContextConfigurationDeterministicChecks();
+  const blockedEconomy = {
+    cristales: 12,
+    highestCrystalTotal: 27,
+    chestProgress: 3,
+    chests: ["existing-chest"],
+    progression: { evolution: 2 },
+  };
+  const blockedEconomySnapshot = JSON.stringify(blockedEconomy);
+  const blockedMovements: string[] = [];
+  const blockedActionResult = await executeStudentActionIfPresent(
+    absentDay,
+    "student-1",
+    () => {
+      blockedEconomy.cristales += 3;
+      blockedEconomy.highestCrystalTotal += 3;
+      blockedEconomy.chestProgress = 0;
+      blockedEconomy.chests.push("new-chest");
+      blockedEconomy.progression.evolution = 3;
+      blockedMovements.push("movement-created");
+      return true;
+    }
+  );
 
   return [
     check("students without an explicit record resolve as present", () => {
@@ -190,6 +216,18 @@ export async function runAttendanceDeterministicChecks(): Promise<
     }),
     check("attendance never changes crystals, chests or progression", () =>
       JSON.stringify(economyState) === economySnapshot),
+    check("implicitly present students can receive actions", () =>
+      canApplyStudentActionToday(emptyDay, "student-without-record")),
+    check("explicitly present students can receive actions", () =>
+      canApplyStudentActionToday(correctedPresentDay, "student-1")),
+    check("absent students cannot receive actions", () =>
+      !canApplyStudentActionToday(absentDay, "student-1")),
+    check("blocked actions create no economic effects or movements", () =>
+      blockedActionResult.status === "blocked-absent"
+      && JSON.stringify(blockedEconomy) === blockedEconomySnapshot
+      && blockedMovements.length === 0),
+    check("arrival after absence enables actions again", () =>
+      canApplyStudentActionToday(arrivedDay, "student-1")),
     check("phase 1 and phase 2 deterministic contracts still pass", () =>
       phase1Checks.length > 0
       && phase2Checks.length > 0

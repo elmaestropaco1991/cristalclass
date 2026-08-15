@@ -72,3 +72,5 @@ export function useAttendance(classroomId: string, localDate: string, timeZone: 
     },
   };
 }
+
+export type AttendanceController = ReturnType<typeof useAttendance>;

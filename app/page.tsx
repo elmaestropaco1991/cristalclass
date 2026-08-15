@@ -14,11 +14,17 @@ import SoundToggleButton from "./components/SoundToggleButton";
 
 import { useStudents } from "./hooks/useStudents";
 import { useMovements } from "./hooks/useMovements";
+import { useAttendance } from "./hooks/useAttendance";
 import { useSoundPreference } from "./hooks/useSoundPreference";
 import { useClassroomGuardianScale } from "./hooks/useClassroomGuardianScale";
 import { createLegacyApplyStudentAction } from "./services/legacyApplyStudentAction";
 import { preloadActionSounds } from "./services/actionSoundService";
+import { getLocalDateKey, getUserTimeZone } from "./services/attendanceDateService";
 import { resolveClassroomId } from "./services/classroomIdentityService";
+import {
+  canApplyStudentActionToday,
+  executeStudentActionIfPresent,
+} from "./services/studentActionAttendanceGuard";
 import type { ActionType } from "./types/action";
 
 export default function Home() {
@@ -34,6 +40,15 @@ export default function Home() {
   const { movements, registrarMovimiento } = useMovements();
   const { soundEnabled, setSoundEnabled, toggleSound } = useSoundPreference();
   const classroomId = resolveClassroomId(alumnos);
+  const [attendanceTimeZone] = useState(getUserTimeZone);
+  const [attendanceLocalDate, setAttendanceLocalDate] = useState(() =>
+    getLocalDateKey(new Date(), attendanceTimeZone)
+  );
+  const attendance = useAttendance(
+    classroomId,
+    attendanceLocalDate,
+    attendanceTimeZone
+  );
   const { guardianScale, setGuardianScale, resetGuardianScale } = useClassroomGuardianScale(
     classroomId
   );
@@ -51,36 +66,54 @@ export default function Home() {
     preloadActionSounds();
   }, []);
 
+  useEffect(() => {
+    const refreshDate = () => {
+      setAttendanceLocalDate(getLocalDateKey(new Date(), attendanceTimeZone));
+    };
+    const refreshInterval = window.setInterval(refreshDate, 60_000);
+
+    return () => window.clearInterval(refreshInterval);
+  }, [attendanceTimeZone]);
+
   const applyStudentAction = createLegacyApplyStudentAction({
     modificarCristales,
     registrarMovimiento,
   });
 
   async function ejecutarAccion(actionId: ActionType) {
-    if (!seleccionado) return false;
+    if (!seleccionado || !attendance.isHydrated) return false;
 
     try {
-      const result = await applyStudentAction.execute({
-        id: crypto.randomUUID(),
-        type: "apply-student-action",
-        teacherId: "legacy-local-teacher",
-        target: {
-          id: seleccionado.id,
-          type: "student",
-        },
-        issuedAt: new Date().toISOString(),
-        idempotencyKey: crypto.randomUUID(),
-        payload: { actionId },
-        metadata: {
-          classroomId: seleccionado.claseId,
-        },
-      });
+      const guardedResult = await executeStudentActionIfPresent(
+        attendance.day,
+        seleccionado.id,
+        () => applyStudentAction.execute({
+          id: crypto.randomUUID(),
+          type: "apply-student-action",
+          teacherId: "legacy-local-teacher",
+          target: {
+            id: seleccionado.id,
+            type: "student",
+          },
+          issuedAt: new Date().toISOString(),
+          idempotencyKey: crypto.randomUUID(),
+          payload: { actionId },
+          metadata: {
+            classroomId: seleccionado.claseId,
+          },
+        })
+      );
 
-      return result.status === "committed";
+      return guardedResult.status === "executed"
+        && guardedResult.value.status === "committed";
     } catch {
       return false;
     }
   }
+
+  const selectedStudentIsAbsent = seleccionado
+    ? !canApplyStudentActionToday(attendance.day, seleccionado.id)
+    : false;
 
   return (
     <main className="h-dvh overflow-y-auto bg-[#e8f3f6] text-slate-950">
@@ -125,6 +158,8 @@ export default function Home() {
                   onClick={() => setSeleccionado(alumno)}
                   loadGuardianEagerly={index === 0}
                   guardianScale={guardianScale}
+                  isAbsent={!canApplyStudentActionToday(attendance.day, alumno.id)}
+                  disabled={!attendance.isHydrated}
                 />
               </div>
             ))}
@@ -151,9 +186,10 @@ export default function Home() {
 
       {asistenciaAbierta && (
         <AttendancePanel
-          key={classroomId}
-          classroomId={classroomId}
+          key={`${classroomId}:${attendanceLocalDate}`}
           students={alumnos}
+          localDate={attendanceLocalDate}
+          attendance={attendance}
           onClose={() => setAsistenciaAbierta(false)}
         />
       )}
@@ -164,6 +200,8 @@ export default function Home() {
           movements={movements}
           soundEnabled={soundEnabled}
           onSoundEnabledChange={setSoundEnabled}
+          actionsDisabled={!attendance.isHydrated || selectedStudentIsAbsent}
+          studentIsAbsent={selectedStudentIsAbsent}
           onCerrar={() => setSeleccionado(null)}
           onAccion={ejecutarAccion}
           onStudentUpdated={guardarAlumno}

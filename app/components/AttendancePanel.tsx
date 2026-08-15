@@ -1,13 +1,11 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useAttendance } from "../hooks/useAttendance";
+import type { AttendanceController } from "../hooks/useAttendance";
 import {
   formatAttendanceDate,
   formatAttendanceTime,
-  getLocalDateKey,
   getLocalTimeInputValue,
-  getUserTimeZone,
   localTimeToInstant,
 } from "../services/attendanceDateService";
 import {
@@ -18,15 +16,14 @@ import type { ResolvedStudentAttendance } from "../types/attendance";
 import type { Student } from "../types/student";
 
 type Props = {
-  classroomId: string;
   students: readonly Student[];
+  localDate: string;
+  attendance: AttendanceController;
   onClose: () => void;
 };
 
-export default function AttendancePanel({ classroomId, students, onClose }: Props) {
+export default function AttendancePanel({ students, localDate, attendance, onClose }: Props) {
   const titleRef = useRef<HTMLHeadingElement>(null);
-  const [timeZone] = useState(getUserTimeZone);
-  const [localDate, setLocalDate] = useState(() => getLocalDateKey(new Date(), timeZone));
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
   const [arrivalDrafts, setArrivalDrafts] = useState<Record<string, string>>({});
   const [error, setError] = useState("");
@@ -41,7 +38,7 @@ export default function AttendancePanel({ classroomId, students, onClose }: Prop
     markArrived,
     correctToPresent,
     correctArrival,
-  } = useAttendance(classroomId, localDate, timeZone);
+  } = attendance;
   const studentIds = useMemo(
     () => activeStudents.map((student) => student.id),
     [activeStudents]
@@ -53,24 +50,12 @@ export default function AttendancePanel({ classroomId, students, onClose }: Prop
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key === "Escape") onClose();
     };
-    const dateRefresh = window.setInterval(() => {
-      setLocalDate((current) => {
-        const next = getLocalDateKey(new Date(), timeZone);
-        if (next !== current) {
-          setSelectedIds(new Set());
-          setArrivalDrafts({});
-          setError("");
-        }
-        return next;
-      });
-    }, 60_000);
 
     window.addEventListener("keydown", closeOnEscape);
     return () => {
-      window.clearInterval(dateRefresh);
       window.removeEventListener("keydown", closeOnEscape);
     };
-  }, [onClose, timeZone]);
+  }, [onClose]);
 
   const toggleSelected = (studentId: string) => {
     setSelectedIds((current) => {

@@ -21,6 +21,8 @@ type Props = {
   catalog: readonly Action[];
   isApplyingAction: boolean;
   actionError: boolean;
+  actionsDisabled: boolean;
+  studentIsAbsent: boolean;
   onApplyAction: (actionId: ActionType) => Promise<boolean>;
   onCatalogChange: (catalog: Action[]) => void;
   onBack: () => void;
@@ -32,6 +34,8 @@ export default function AdditionalActionsPanel({
   catalog,
   isApplyingAction,
   actionError,
+  actionsDisabled,
+  studentIsAbsent,
   onApplyAction,
   onCatalogChange,
   onBack,
@@ -130,6 +134,11 @@ export default function AdditionalActionsPanel({
         <div className="min-h-0 overflow-y-auto px-5 py-5 sm:px-8 sm:py-6">
           <p aria-live="assertive" className="sr-only">{actionError ? "No se pudo aplicar la acción." : ""}</p>
           <p aria-live="polite" className="sr-only">{isApplyingAction ? "Aplicando acción." : ""}</p>
+          {studentIsAbsent && mode === "operational" && (
+            <p role="status" className="mb-5 rounded-2xl border border-slate-300 bg-slate-100 px-4 py-3 font-black text-slate-700">
+              Alumno ausente: las acciones de cristales están deshabilitadas.
+            </p>
+          )}
 
           {mode === "configuration" ? (
             <>
@@ -142,8 +151,8 @@ export default function AdditionalActionsPanel({
             </p>
           ) : (
             <div className="space-y-7">
-              <ActionSection title="Acciones positivas" actions={positiveActions} studentName={student.nombre} isApplyingAction={isApplyingAction} onApplyAction={onApplyAction} />
-              <ActionSection title="Acciones negativas" actions={negativeActions} studentName={student.nombre} isApplyingAction={isApplyingAction} onApplyAction={onApplyAction} />
+              <ActionSection title="Acciones positivas" actions={positiveActions} studentName={student.nombre} isApplyingAction={isApplyingAction || actionsDisabled} onApplyAction={onApplyAction} />
+              <ActionSection title="Acciones negativas" actions={negativeActions} studentName={student.nombre} isApplyingAction={isApplyingAction || actionsDisabled} onApplyAction={onApplyAction} />
             </div>
           )}
         </div>

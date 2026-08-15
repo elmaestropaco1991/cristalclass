@@ -8,6 +8,8 @@ type Props = {
   onClick: () => void;
   loadGuardianEagerly?: boolean;
   guardianScale: number;
+  isAbsent?: boolean;
+  disabled?: boolean;
 };
 
 export default function StudentCard({
@@ -15,6 +17,8 @@ export default function StudentCard({
   onClick,
   loadGuardianEagerly = false,
   guardianScale,
+  isAbsent = false,
+  disabled = false,
 }: Props) {
   const pendingChestCount = alumno.chests.filter(
     (chest) => chest.status === "pending" || chest.status === "closed"
@@ -27,14 +31,19 @@ export default function StudentCard({
        : 9.5 + guardianScale * 0.075}px`,
   } as CSSProperties;
   const isOverviewScale = guardianScale <= 60;
+  const isInteractionDisabled = disabled || isAbsent;
 
   return (
     <button
       type="button"
       onClick={onClick}
-      aria-label={`Abrir ficha de ${alumno.nombre} ${alumno.apellidos}`}
+      disabled={isInteractionDisabled}
+      aria-disabled={isInteractionDisabled}
+      aria-label={isAbsent
+        ? `${alumno.nombre} ${alumno.apellidos}, ausente`
+        : `Abrir ficha de ${alumno.nombre} ${alumno.apellidos}`}
       style={appearanceStyle}
-      className="group relative flex h-[calc(15rem*var(--guardian-scale-mobile))] w-full flex-col items-center justify-end rounded-[2rem] text-center transition duration-200 motion-reduce:transition-none focus-visible:outline-4 focus-visible:outline-cyan-700 focus-visible:outline-offset-2 sm:h-[calc(15rem*var(--guardian-scale))] 2xl:h-[calc(17rem*var(--guardian-scale))]"
+      className="group relative flex h-[calc(15rem*var(--guardian-scale-mobile))] w-full flex-col items-center justify-end rounded-[2rem] text-center transition duration-200 disabled:cursor-not-allowed motion-reduce:transition-none focus-visible:outline-4 focus-visible:outline-cyan-700 focus-visible:outline-offset-2 sm:h-[calc(15rem*var(--guardian-scale))] 2xl:h-[calc(17rem*var(--guardian-scale))]"
     >
       <div aria-hidden="true" className="absolute inset-1 rounded-[1.7rem] bg-white/25 opacity-0 transition group-hover:opacity-100 group-focus-visible:opacity-100 motion-reduce:transition-none" />
       <div aria-hidden="true" className="absolute left-1/2 top-4 h-[calc(10rem*var(--guardian-scale-mobile))] w-[calc(10rem*var(--guardian-scale-mobile))] -translate-x-1/2 rounded-full bg-[radial-gradient(circle,rgba(255,255,255,.78),rgba(142,232,244,.26)_48%,transparent_72%)] opacity-75 blur-md sm:h-[calc(10rem*var(--guardian-scale))] sm:w-[calc(10rem*var(--guardian-scale))] 2xl:top-5 2xl:h-[calc(13rem*var(--guardian-scale))] 2xl:w-[calc(13rem*var(--guardian-scale))]" />
@@ -45,12 +54,23 @@ export default function StudentCard({
         <div className="absolute bottom-1 left-1/2 h-[calc(11rem*var(--guardian-scale-mobile))] w-full max-w-[calc(11rem*var(--guardian-scale-mobile))] -translate-x-1/2 sm:h-[calc(11rem*var(--guardian-scale))] sm:max-w-[calc(11rem*var(--guardian-scale))] 2xl:h-[calc(13rem*var(--guardian-scale))] 2xl:max-w-[calc(13rem*var(--guardian-scale))]">
           <EquippedAvatar
             student={alumno}
-            className="h-full w-full transition duration-200 group-hover:-translate-y-1 group-focus-visible:-translate-y-1 motion-reduce:transition-none"
+            className={`h-full w-full transition duration-200 motion-reduce:transition-none ${
+              isAbsent
+                ? "brightness-[.7] saturate-[.45] opacity-80"
+                : "group-hover:-translate-y-1 group-focus-visible:-translate-y-1"
+            }`}
             avatarClassName="drop-shadow-[0_16px_14px_rgba(21,76,98,.28)]"
             imageLoading={loadGuardianEagerly ? "eager" : undefined}
           />
-
         </div>
+        {isAbsent && (
+          <>
+            <div aria-hidden="true" className="pointer-events-none absolute inset-x-[8%] inset-y-[4%] z-20 rounded-[1.5rem] bg-slate-900/10" />
+            <span className="pointer-events-none absolute left-1/2 top-1/2 z-30 -translate-x-1/2 -translate-y-1/2 rounded-full border border-white/70 bg-slate-800/85 px-3 py-1 text-xs font-black uppercase tracking-[.12em] text-white shadow-sm sm:text-sm">
+              Ausente
+            </span>
+          </>
+        )}
       </div>
 
       <div className="relative z-20 mt-auto flex flex-col items-center pb-2.5">
