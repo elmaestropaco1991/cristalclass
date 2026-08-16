@@ -1,4 +1,5 @@
 import {
+  closeContinuousRound,
   createRandomSelectionPreviewSequence,
   createRandomSelectionActionCompletionGuard,
   createRandomStudentRoundState,
@@ -17,6 +18,12 @@ import {
   getRandomStudentSelectorStorageKey,
   loadRandomStudentRoundState,
 } from "./randomStudentSelectorStorageService";
+import {
+  getActionFeedbackPlan,
+  shouldCompleteActionAfterFeedback,
+} from "./actionFeedbackService";
+import { shouldPlayRandomSelectorSound } from "./randomStudentSelectorSoundService";
+import { parseSoundEnabled } from "./soundPreferenceService";
 
 export type RandomStudentSelectorDeterministicCheck = {
   readonly name: string;
@@ -67,6 +74,7 @@ export function runRandomStudentSelectorDeterministicChecks(): readonly RandomSt
   const completionGuard = createRandomSelectionActionCompletionGuard();
   const firstCompletion = completionGuard.complete("close-and-select-next");
   const duplicateCompletion = completionGuard.complete("close-and-select-next");
+  const closedRound = closeContinuousRound(partlyCompleted);
 
   return [
     check("only present students participate", () =>
@@ -127,6 +135,22 @@ export function runRandomStudentSelectorDeterministicChecks(): readonly RandomSt
         && presentation.name === "Ana"
         && presentation.artwork === "equipped-avatar";
     }),
+    check("continuous flow advances only after confirmed feedback", () =>
+      getActionFeedbackPlan(1, true, false)?.kind === "positive"
+      && !shouldCompleteActionAfterFeedback(true, false)
+      && shouldCompleteActionAfterFeedback(true, true)
+      && resolveRandomSelectionActionFlow("continuous", true, true)
+        === "close-and-select-next"),
+    check("a rejected action has no confirmation and does not advance", () =>
+      getActionFeedbackPlan(1, false, false) === null
+      && !shouldCompleteActionAfterFeedback(false, true)
+      && resolveRandomSelectionActionFlow("continuous", false, true)
+        === "keep-modal-open"),
+    check("the shared sound preference is restored and respected", () =>
+      parseSoundEnabled("true")
+      && !parseSoundEnabled("false")
+      && shouldPlayRandomSelectorSound(parseSoundEnabled("true"), true)
+      && !shouldPlayRandomSelectorSound(parseSoundEnabled("false"), true)),
     check("reduced motion skips the intense sequence without blocking selection", () => {
       const plan = getRandomSelectionAnimationPlan(true);
       return plan.frameDelaysMs.length === 0
@@ -169,6 +193,12 @@ export function runRandomStudentSelectorDeterministicChecks(): readonly RandomSt
       && duplicateCompletion === "ignored"),
     check("the last student completes the round without opening another modal", () =>
       !shouldStartNextRandomSelection("close-and-select-next", 0)),
+    check("closing a round stops it without clearing previous participants", () =>
+      !closedRound.isContinuousRunning
+      && JSON.stringify(closedRound.selectedStudentIds)
+        === JSON.stringify(partlyCompleted.selectedStudentIds)
+      && JSON.stringify(getAvailableStudentIds(closedRound, presentStudentIds))
+        === JSON.stringify(getAvailableStudentIds(partlyCompleted, presentStudentIds))),
   ];
 }
 

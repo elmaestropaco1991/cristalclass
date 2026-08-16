@@ -118,6 +118,13 @@ export function stopContinuousRound(
   return { ...state, isContinuousRunning: false };
 }
 
+/** Closes the active round UI without clearing previous participants. */
+export function closeContinuousRound(
+  state: RandomStudentRoundState
+): RandomStudentRoundState {
+  return stopContinuousRound(state);
+}
+
 export function resetContinuousRound(
   state: RandomStudentRoundState
 ): RandomStudentRoundState {

@@ -36,6 +36,7 @@ import {
   selectRandomStudentId,
   shouldStartNextRandomSelection,
 } from "./services/randomStudentSelectorService";
+import { prepareRandomSelectorAudio } from "./services/randomStudentSelectorSoundService";
 import type { ActionType } from "./types/action";
 import type {
   RandomSelectionActionFlow,
@@ -93,6 +94,8 @@ export default function Home() {
   const [asistenciaAbierta, setAsistenciaAbierta] = useState(false);
   const [selectorAbierto, setSelectorAbierto] = useState(false);
   const [selectorMessage, setSelectorMessage] = useState("");
+  const [roundControlsVisible, setRoundControlsVisible] = useState(false);
+  const [roundControlsDismissed, setRoundControlsDismissed] = useState(false);
   const [selectionAnimation, setSelectionAnimation] =
     useState<RandomStudentSelectionAnimation | null>(null);
   const selectionAnimationIdRef = useRef(0);
@@ -113,6 +116,13 @@ export default function Home() {
   useEffect(() => {
     continuousRunningRef.current = randomSelector.isContinuousRunning;
   }, [randomSelector.isContinuousRunning]);
+
+  const shouldShowRoundControls = roundControlsVisible || (
+    !roundControlsDismissed
+    && randomSelector.isHydrated
+    && randomSelector.state.activeMode === "continuous"
+    && randomSelector.state.selectedStudentIds.length > 0
+  );
 
   useEffect(() => {
     const refreshDate = () => {
@@ -169,6 +179,7 @@ export default function Home() {
     mode: RandomStudentSelectionMode,
     completedStudentId?: string
   ) {
+    prepareRandomSelectorAudio(soundEnabled);
     setSelectorMessage("");
 
     if (!attendance.isHydrated || !randomSelector.isHydrated) {
@@ -206,6 +217,8 @@ export default function Home() {
 
     randomSelector.selectMode(mode);
     continuousRunningRef.current = mode === "continuous";
+    setRoundControlsVisible(mode === "continuous");
+    if (mode === "continuous") setRoundControlsDismissed(false);
     selectionAnimationIdRef.current += 1;
     setSelectorAbierto(false);
     setSelectionAnimation({
@@ -255,6 +268,22 @@ export default function Home() {
     randomSelector.resetContinuousRound();
     setSelectionAnimation(null);
     setSelectorMessage("Ronda reiniciada. Todo el alumnado presente vuelve a estar disponible.");
+  }
+
+  function closeRandomRound() {
+    continuousRunningRef.current = false;
+    randomSelector.closeContinuousRound();
+    setSelectionAnimation(null);
+    setSelectorAbierto(false);
+    setSelectorMessage("");
+    setRoundControlsVisible(false);
+    setRoundControlsDismissed(true);
+    postActionFlowRef.current = null;
+
+    if (modalOriginRef.current === "continuous") {
+      setSeleccionado(null);
+    }
+    modalOriginRef.current = "classroom";
   }
 
   function openStudentFromClassroom(student: typeof alumnos[number]) {
@@ -436,11 +465,14 @@ export default function Home() {
         state={randomSelector.state}
         isHydrated={attendance.isHydrated && randomSelector.isHydrated}
         isContinuousRunning={randomSelector.isContinuousRunning}
+        roundControlsVisible={shouldShowRoundControls}
+        soundEnabled={soundEnabled}
         message={selectorMessage}
         animation={selectionAnimation}
         onCloseNotice={() => setSelectorAbierto(false)}
         onContinueContinuous={() => beginRandomSelection("continuous")}
         onStopContinuous={stopRandomRound}
+        onCloseContinuousRound={closeRandomRound}
         onResetContinuous={resetRandomRound}
         onAnimationComplete={completeRandomSelection}
       />

@@ -6,6 +6,10 @@ import {
   getRandomSelectionAnimationPlan,
   getRandomSelectorCandidatePresentation,
 } from "../services/randomStudentSelectorService";
+import {
+  playRandomSelectorSound,
+  stopRandomSelectorSounds,
+} from "../services/randomStudentSelectorSoundService";
 import type { Student } from "../types/student";
 import type {
   RandomStudentRoundState,
@@ -28,11 +32,14 @@ type Props = {
   state: RandomStudentRoundState;
   isHydrated: boolean;
   isContinuousRunning: boolean;
+  roundControlsVisible: boolean;
+  soundEnabled: boolean;
   message: string;
   animation: RandomStudentSelectionAnimation | null;
   onCloseNotice: () => void;
   onContinueContinuous: () => void;
   onStopContinuous: () => void;
+  onCloseContinuousRound: () => void;
   onResetContinuous: () => void;
   onAnimationComplete: (animation: RandomStudentSelectionAnimation) => void;
 };
@@ -45,11 +52,14 @@ export default function RandomStudentSelector({
   state,
   isHydrated,
   isContinuousRunning,
+  roundControlsVisible,
+  soundEnabled,
   message,
   animation,
   onCloseNotice,
   onContinueContinuous,
   onStopContinuous,
+  onCloseContinuousRound,
   onResetContinuous,
   onAnimationComplete,
 }: Props) {
@@ -70,6 +80,7 @@ export default function RandomStudentSelector({
           onClose={onCloseNotice}
           onContinue={onContinueContinuous}
           onStop={onStopContinuous}
+          onCloseRound={onCloseContinuousRound}
           onReset={onResetContinuous}
         />
       )}
@@ -79,12 +90,14 @@ export default function RandomStudentSelector({
           key={animation.id}
           animation={animation}
           students={students}
+          soundEnabled={soundEnabled}
           onComplete={onAnimationComplete}
           onStopContinuous={onStopContinuous}
+          onCloseContinuousRound={onCloseContinuousRound}
         />
       )}
 
-      {isRoundContext && !noticeOpen && !animation && (
+      {isRoundContext && roundControlsVisible && !noticeOpen && !animation && (
         <RoundControls
           isRunning={isContinuousRunning}
           isComplete={isRoundComplete}
@@ -92,6 +105,7 @@ export default function RandomStudentSelector({
           hasPreviousSelections={state.selectedStudentIds.length > 0}
           onContinue={onContinueContinuous}
           onStop={onStopContinuous}
+          onCloseRound={onCloseContinuousRound}
           onReset={onResetContinuous}
         />
       )}
@@ -108,6 +122,7 @@ function SelectorNotice({
   onClose,
   onContinue,
   onStop,
+  onCloseRound,
   onReset,
 }: {
   message: string;
@@ -118,6 +133,7 @@ function SelectorNotice({
   onClose: () => void;
   onContinue: () => void;
   onStop: () => void;
+  onCloseRound: () => void;
   onReset: () => void;
 }) {
   const titleRef = useRef<HTMLHeadingElement>(null);
@@ -185,6 +201,9 @@ function SelectorNotice({
             <button type="button" onClick={onReset} className="min-h-11 rounded-xl border border-cyan-900/20 bg-white/85 px-4 py-2 font-black text-[#173d70] focus-visible:outline-4 focus-visible:outline-cyan-400">
               Reiniciar ronda
             </button>
+            <button type="button" onClick={onCloseRound} className="min-h-11 rounded-xl border border-cyan-900/25 bg-[#173d70] px-4 py-2 font-black text-white focus-visible:outline-4 focus-visible:outline-cyan-300">
+              Cerrar ronda
+            </button>
           </div>
         )}
       </section>
@@ -199,6 +218,7 @@ function RoundControls({
   hasPreviousSelections,
   onContinue,
   onStop,
+  onCloseRound,
   onReset,
 }: {
   isRunning: boolean;
@@ -207,6 +227,7 @@ function RoundControls({
   hasPreviousSelections: boolean;
   onContinue: () => void;
   onStop: () => void;
+  onCloseRound: () => void;
   onReset: () => void;
 }) {
   return (
@@ -229,6 +250,9 @@ function RoundControls({
       <button type="button" onClick={onReset} className="min-h-10 rounded-full bg-white/15 px-3 py-2 text-sm font-black text-white focus-visible:outline-4 focus-visible:outline-cyan-300">
         Reiniciar
       </button>
+      <button type="button" onClick={onCloseRound} className="min-h-10 rounded-full border border-white/35 bg-slate-950/35 px-3 py-2 text-sm font-black text-white focus-visible:outline-4 focus-visible:outline-cyan-300">
+        Cerrar ronda
+      </button>
     </aside>
   );
 }
@@ -236,13 +260,17 @@ function RoundControls({
 function SelectionAnimation({
   animation,
   students,
+  soundEnabled,
   onComplete,
   onStopContinuous,
+  onCloseContinuousRound,
 }: {
   animation: RandomStudentSelectionAnimation;
   students: readonly Student[];
+  soundEnabled: boolean;
   onComplete: (animation: RandomStudentSelectionAnimation) => void;
   onStopContinuous: () => void;
+  onCloseContinuousRound: () => void;
 }) {
   const studentMap = useMemo(
     () => new Map(students.map((student) => [student.id, student])),
@@ -272,6 +300,7 @@ function SelectionAnimation({
       setPreviewStudentId(animation.targetStudentId);
       setFrameIndex((current) => current + 1);
       setSelected(true);
+      playRandomSelectorSound("selected", soundEnabled);
       timer = window.setTimeout(
         () => completeRef.current(animation),
         plan.selectedHoldMs
@@ -286,6 +315,11 @@ function SelectionAnimation({
 
       setPreviewStudentId(sequence[frame] ?? animation.targetStudentId);
       setFrameIndex(frame);
+      playRandomSelectorSound(
+        "tick",
+        soundEnabled,
+        frame / Math.max(plan.frameDelaysMs.length - 1, 1)
+      );
       timer = window.setTimeout(() => {
         frame += 1;
         showFrame();
@@ -297,8 +331,9 @@ function SelectionAnimation({
 
     return () => {
       if (timer !== null) window.clearTimeout(timer);
+      stopRandomSelectorSounds();
     };
-  }, [animation]);
+  }, [animation, soundEnabled]);
 
   const previewStudent = studentMap.get(previewStudentId)
     ?? studentMap.get(animation.targetStudentId);
@@ -319,10 +354,8 @@ function SelectionAnimation({
         <div
           key={`${animation.id}-${frameIndex}-${previewStudent.id}`}
           aria-hidden="true"
-          className={`relative flex w-full max-w-2xl flex-col items-center text-center transition duration-300 motion-reduce:transition-none ${
-            selected
-              ? "scale-[1.04] drop-shadow-[0_0_18px_rgba(103,232,249,.72)]"
-              : "scale-100"
+          className={`relative flex w-full max-w-2xl flex-col items-center text-center ${
+            selected ? "selector-winner-glow" : "selector-candidate-enter"
           }`}
         >
           <p className="text-xs font-black uppercase tracking-[.24em] text-cyan-950/70 sm:text-sm">
@@ -344,13 +377,22 @@ function SelectionAnimation({
       )}
 
       {animation.mode === "continuous" && (
-        <button
-          type="button"
-          onClick={onStopContinuous}
-          className="absolute right-3 top-[max(.75rem,env(safe-area-inset-top))] min-h-11 rounded-full border-2 border-white/80 bg-amber-500 px-4 py-2 font-black text-slate-950 shadow-lg focus-visible:outline-4 focus-visible:outline-cyan-300 sm:right-6 sm:top-[max(1.5rem,env(safe-area-inset-top))] sm:px-5"
-        >
-          Detener ronda
-        </button>
+        <div className="absolute right-3 top-[max(.75rem,env(safe-area-inset-top))] flex flex-wrap justify-end gap-2 sm:right-6 sm:top-[max(1.5rem,env(safe-area-inset-top))]">
+          <button
+            type="button"
+            onClick={onStopContinuous}
+            className="min-h-11 rounded-full border-2 border-white/80 bg-amber-500 px-4 py-2 font-black text-slate-950 shadow-lg focus-visible:outline-4 focus-visible:outline-cyan-300 sm:px-5"
+          >
+            Detener ronda
+          </button>
+          <button
+            type="button"
+            onClick={onCloseContinuousRound}
+            className="min-h-11 rounded-full border-2 border-white/80 bg-[#173d70] px-4 py-2 font-black text-white shadow-lg focus-visible:outline-4 focus-visible:outline-cyan-300 sm:px-5"
+          >
+            Cerrar ronda
+          </button>
+        </div>
       )}
     </div>
   );

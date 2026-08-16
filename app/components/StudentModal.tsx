@@ -12,12 +12,17 @@ import {
   prepareActionAudio,
   shouldRequestActionSound,
 } from "../services/actionSoundService";
+import {
+  getActionFeedbackPlan,
+  shouldCompleteActionAfterFeedback,
+} from "../services/actionFeedbackService";
 import { getActionCatalog } from "../services/actionService";
 import type { Action, ActionType } from "../types/action";
 import type { Movement } from "../types/movement";
 import type { Student } from "../types/student";
 import type { ItemCategory } from "../../domain";
 import AdditionalActionsPanel from "./AdditionalActionsPanel";
+import ActionConfirmationFeedback from "./ActionConfirmationFeedback";
 import ActionOrbit from "./ActionOrbit";
 import AvatarArena from "./AvatarArena";
 import ChestOpeningVideo, {
@@ -52,6 +57,8 @@ export default function StudentModal({ alumno, movements, soundEnabled, onSoundE
   const [lastCollectionCategory, setLastCollectionCategory] = useState<ItemCategory | null>(null);
   const [isApplyingAction, setIsApplyingAction] = useState(false);
   const [actionError, setActionError] = useState(false);
+  const [actionFeedbackKind, setActionFeedbackKind] =
+    useState<"positive" | "negative" | null>(null);
   const [actionCatalog, setActionCatalog] = useState<Action[]>(() => getActionCatalog());
   const actionGuardRef = useRef(createActionApplicationGuard());
   const pendingChestCount = alumno.chests.filter(
@@ -59,15 +66,29 @@ export default function StudentModal({ alumno, movements, soundEnabled, onSoundE
   ).length;
   const chestFlowGuardRef = useRef(false);
   const chestOpeningVideoRef = useRef<ChestOpeningVideoHandle>(null);
+  const feedbackTimerRef = useRef<number | null>(null);
+  const feedbackResolveRef = useRef<(() => void) | null>(null);
+  const mountedRef = useRef(true);
 
   useEffect(() => {
     if (pendingChestCount > 0) preloadChestOpeningVideo();
   }, [pendingChestCount]);
 
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      if (feedbackTimerRef.current !== null) window.clearTimeout(feedbackTimerRef.current);
+      feedbackResolveRef.current?.();
+      feedbackResolveRef.current = null;
+    };
+  }, []);
+
   const handleClose = () => {
     if (
       !actionGuardRef.current.isProcessing
       && !isApplyingAction
+      && actionFeedbackKind === null
     ) {
       onCerrar();
     }
@@ -103,10 +124,30 @@ export default function StudentModal({ alumno, movements, soundEnabled, onSoundE
     const outcome = await actionGuardRef.current.run(() => onAccion(actionId));
 
     if (shouldCloseAfterActionApplication(outcome)) {
+      const feedbackPlan = getActionFeedbackPlan(
+        actionPoints,
+        true,
+        window.matchMedia("(prefers-reduced-motion: reduce)").matches
+      );
       if (shouldRequestActionSound(actionPoints, soundEnabled, true)) {
         playActionSound(actionPoints);
       }
-      onActionAppliedSuccessfully();
+      if (feedbackPlan) {
+        setAdditionalActionsOpen(false);
+        setActionFeedbackKind(feedbackPlan.kind);
+        await new Promise<void>((resolve) => {
+          feedbackResolveRef.current = resolve;
+          feedbackTimerRef.current = window.setTimeout(() => {
+            feedbackTimerRef.current = null;
+            feedbackResolveRef.current = null;
+            setActionFeedbackKind(null);
+            resolve();
+          }, feedbackPlan.durationMs);
+        });
+      }
+      if (mountedRef.current && shouldCompleteActionAfterFeedback(true, true)) {
+        onActionAppliedSuccessfully();
+      }
       return true;
     }
 
@@ -176,9 +217,19 @@ export default function StudentModal({ alumno, movements, soundEnabled, onSoundE
         )}
 
         <div className="absolute left-1/2 top-[52%] h-[700px] w-[700px] -translate-x-1/2 -translate-y-1/2 scale-[0.58] sm:scale-[0.7] lg:scale-[0.76] xl:scale-[0.8] 2xl:top-[47%] 2xl:scale-100">
-          <AvatarArena student={alumno} />
-          <ActionOrbit onAccion={handleAction} disabled={isApplyingAction || actionsDisabled} actions={actionCatalog} />
+          <div className={`relative h-full w-full ${
+            actionFeedbackKind === "positive"
+              ? "action-feedback-avatar-positive"
+              : actionFeedbackKind === "negative"
+                ? "action-feedback-avatar-negative"
+                : ""
+          }`}>
+            <AvatarArena student={alumno} />
+            <ActionOrbit onAccion={handleAction} disabled={isApplyingAction || actionsDisabled} actions={actionCatalog} />
+          </div>
         </div>
+
+        {actionFeedbackKind && <ActionConfirmationFeedback kind={actionFeedbackKind} />}
 
         <button
           type="button"

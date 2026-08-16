@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { RandomStudentSelectionMode } from "../types/randomStudentSelector";
 import {
+  closeContinuousRound,
   createRandomStudentRoundState,
   getAvailableStudentIds,
   normalizeRandomStudentRoundState,
@@ -100,6 +101,9 @@ export function useRandomStudentSelector(
     },
     stopContinuousRound() {
       updateAndPersist(stopContinuousRound);
+    },
+    closeContinuousRound() {
+      updateAndPersist(closeContinuousRound);
     },
     resetContinuousRound() {
       updateAndPersist(resetContinuousRound);

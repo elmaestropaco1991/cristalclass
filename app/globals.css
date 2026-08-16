@@ -92,3 +92,94 @@ body {
 .animate-softGlow {
   animation: softGlow 2.8s ease-in-out infinite;
 }
+
+@keyframes selectorCandidateEnter {
+  0% {
+    opacity: 0;
+    transform: translateY(18px) scale(.92);
+  }
+  55% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes selectorWinnerGlow {
+  0% {
+    filter: brightness(1);
+    transform: scale(1);
+  }
+  55% {
+    filter: brightness(1.22) drop-shadow(0 0 22px rgba(103, 232, 249, .9));
+    transform: scale(1.08);
+  }
+  100% {
+    filter: brightness(1.08) drop-shadow(0 0 14px rgba(103, 232, 249, .65));
+    transform: scale(1.04);
+  }
+}
+
+.selector-candidate-enter {
+  animation: selectorCandidateEnter 220ms ease-out both;
+}
+
+.selector-winner-glow {
+  animation: selectorWinnerGlow 520ms ease-out both;
+}
+
+@keyframes actionFeedbackPositiveAvatar {
+  0%, 100% { transform: translateY(0) scale(1); }
+  42% { transform: translateY(-18px) scale(1.025); }
+  68% { transform: translateY(-8px) scale(1.01); }
+}
+
+@keyframes actionFeedbackNegativeAvatar {
+  0%, 100% { transform: translateY(0) scale(1); }
+  38% { transform: translateY(10px) scale(.985); }
+  72% { transform: translateY(4px) scale(.995); }
+}
+
+.action-feedback-avatar-positive {
+  animation: actionFeedbackPositiveAvatar 520ms ease-out both;
+}
+
+.action-feedback-avatar-negative {
+  animation: actionFeedbackNegativeAvatar 520ms ease-out both;
+}
+
+@keyframes actionFeedbackLayer {
+  0% { opacity: 0; }
+  28% { opacity: 1; }
+  100% { opacity: 0; }
+}
+
+.action-feedback-positive,
+.action-feedback-negative {
+  animation: actionFeedbackLayer 520ms ease-out both;
+}
+
+@keyframes actionFeedbackParticle {
+  0% { opacity: 0; transform: translate(-50%, 20px) rotate(45deg) scale(.6); }
+  30% { opacity: 1; }
+  100% { opacity: 0; transform: translate(-50%, -90px) rotate(135deg) scale(1.1); }
+}
+
+.action-feedback-particle {
+  left: var(--particle-x);
+  width: var(--particle-size);
+  height: var(--particle-size);
+  animation: actionFeedbackParticle 480ms ease-out var(--particle-delay) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .selector-candidate-enter,
+  .selector-winner-glow,
+  .action-feedback-avatar-positive,
+  .action-feedback-avatar-negative,
+  .action-feedback-particle {
+    animation: none;
+  }
+}
