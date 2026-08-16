@@ -1,11 +1,14 @@
 "use client";
 
-import { useEffect, useState, type CSSProperties } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 
 import Header from "./components/Header";
 import AttendancePanel from "./components/AttendancePanel";
 import ClassroomContextNavigation from "./components/ClassroomContextNavigation";
 import MenuButton from "./components/MenuButton";
+import RandomStudentSelector, {
+  type RandomStudentSelectionAnimation,
+} from "./components/RandomStudentSelector";
 import SideMenu from "./components/SideMenu";
 import StudentCard from "./components/StudentCard";
 import StudentModal from "./components/StudentModal";
@@ -15,6 +18,7 @@ import SoundToggleButton from "./components/SoundToggleButton";
 import { useStudents } from "./hooks/useStudents";
 import { useMovements } from "./hooks/useMovements";
 import { useAttendance } from "./hooks/useAttendance";
+import { useRandomStudentSelector } from "./hooks/useRandomStudentSelector";
 import { useSoundPreference } from "./hooks/useSoundPreference";
 import { useClassroomGuardianScale } from "./hooks/useClassroomGuardianScale";
 import { createLegacyApplyStudentAction } from "./services/legacyApplyStudentAction";
@@ -25,7 +29,19 @@ import {
   canApplyStudentActionToday,
   executeStudentActionIfPresent,
 } from "./services/studentActionAttendanceGuard";
+import {
+  createRandomSelectionActionCompletionGuard,
+  getRandomSelectionModeForAccess,
+  resolveRandomSelectionActionFlow,
+  selectRandomStudentId,
+  shouldStartNextRandomSelection,
+} from "./services/randomStudentSelectorService";
 import type { ActionType } from "./types/action";
+import type {
+  RandomSelectionActionFlow,
+  RandomStudentSelectionMode,
+  StudentModalOrigin,
+} from "./types/randomStudentSelector";
 
 export default function Home() {
   const {
@@ -49,6 +65,20 @@ export default function Home() {
     attendanceLocalDate,
     attendanceTimeZone
   );
+  const validStudentIds = useMemo(() => alumnos.map((student) => student.id), [alumnos]);
+  const presentStudentIds = useMemo(
+    () => attendance.isHydrated
+      ? alumnos
+          .filter((student) => canApplyStudentActionToday(attendance.day, student.id))
+          .map((student) => student.id)
+      : [],
+    [alumnos, attendance.day, attendance.isHydrated]
+  );
+  const randomSelector = useRandomStudentSelector(
+    classroomId,
+    validStudentIds,
+    presentStudentIds
+  );
   const { guardianScale, setGuardianScale, resetGuardianScale } = useClassroomGuardianScale(
     classroomId
   );
@@ -61,10 +91,28 @@ export default function Home() {
   const [menuAbierto, setMenuAbierto] = useState(false);
   const [gestorAlumnosAbierto, setGestorAlumnosAbierto] = useState(false);
   const [asistenciaAbierta, setAsistenciaAbierta] = useState(false);
+  const [selectorAbierto, setSelectorAbierto] = useState(false);
+  const [selectorMessage, setSelectorMessage] = useState("");
+  const [selectionAnimation, setSelectionAnimation] =
+    useState<RandomStudentSelectionAnimation | null>(null);
+  const selectionAnimationIdRef = useRef(0);
+  const modalOriginRef = useRef<StudentModalOrigin>("classroom");
+  const postActionFlowRef = useRef<RandomSelectionActionFlow | null>(null);
+  const actionCompletionGuardRef = useRef(
+    createRandomSelectionActionCompletionGuard()
+  );
+  const continuousRunningRef = useRef(randomSelector.isContinuousRunning);
+  const beginRandomSelectionRef = useRef<(
+    mode: RandomStudentSelectionMode
+  ) => void>(() => undefined);
 
   useEffect(() => {
     preloadActionSounds();
   }, []);
+
+  useEffect(() => {
+    continuousRunningRef.current = randomSelector.isContinuousRunning;
+  }, [randomSelector.isContinuousRunning]);
 
   useEffect(() => {
     const refreshDate = () => {
@@ -104,16 +152,194 @@ export default function Home() {
         })
       );
 
-      return guardedResult.status === "executed"
+      const committed = guardedResult.status === "executed"
         && guardedResult.value.status === "committed";
+      postActionFlowRef.current = resolveRandomSelectionActionFlow(
+        modalOriginRef.current,
+        committed,
+        continuousRunningRef.current
+      );
+      return committed;
     } catch {
       return false;
+    }
+  }
+
+  function beginRandomSelection(
+    mode: RandomStudentSelectionMode,
+    completedStudentId?: string
+  ) {
+    setSelectorMessage("");
+
+    if (!attendance.isHydrated || !randomSelector.isHydrated) {
+      setSelectorMessage("El selector todavía está preparando la asistencia del aula.");
+      setSelectorAbierto(true);
+      return;
+    }
+
+    const candidateStudentIds = mode === "continuous"
+      ? randomSelector.availableStudentIds.filter(
+          (studentId) => studentId !== completedStudentId
+        )
+      : presentStudentIds;
+
+    if (candidateStudentIds.length === 0) {
+      if (mode === "continuous") {
+        continuousRunningRef.current = false;
+        randomSelector.stopContinuousRound();
+      }
+      setSelectorMessage(
+        presentStudentIds.length === 0
+          ? "No hay alumnado presente disponible para seleccionar."
+          : "Ronda terminada: todo el alumnado presente ha participado."
+      );
+      setSelectorAbierto(true);
+      return;
+    }
+
+    const targetStudentId = selectRandomStudentId(candidateStudentIds);
+    if (!targetStudentId) {
+      setSelectorMessage("No se ha podido realizar la selección. Inténtalo de nuevo.");
+      setSelectorAbierto(true);
+      return;
+    }
+
+    randomSelector.selectMode(mode);
+    continuousRunningRef.current = mode === "continuous";
+    selectionAnimationIdRef.current += 1;
+    setSelectorAbierto(false);
+    setSelectionAnimation({
+      id: selectionAnimationIdRef.current,
+      mode,
+      candidateStudentIds,
+      targetStudentId,
+    });
+  }
+
+  useEffect(() => {
+    beginRandomSelectionRef.current = beginRandomSelection;
+  });
+
+  function completeRandomSelection(animation: RandomStudentSelectionAnimation) {
+    setSelectionAnimation(null);
+    const student = alumnos.find((candidate) => candidate.id === animation.targetStudentId);
+    const remainsPresent = presentStudentIds.includes(animation.targetStudentId);
+
+    if (!student || !remainsPresent) {
+      setSelectorMessage("La asistencia ha cambiado. Se realizará otra selección.");
+      if (animation.mode === "continuous" && continuousRunningRef.current) {
+        beginRandomSelection("continuous");
+      } else {
+        setSelectorAbierto(true);
+      }
+      return;
+    }
+
+    modalOriginRef.current = animation.mode;
+    postActionFlowRef.current = null;
+    actionCompletionGuardRef.current.reset();
+    setSeleccionado(student);
+  }
+
+  function stopRandomRound() {
+    const wasAnimating = selectionAnimation?.mode === "continuous";
+    continuousRunningRef.current = false;
+    randomSelector.stopContinuousRound();
+    setSelectionAnimation(null);
+    setSelectorMessage("Ronda detenida. Puedes continuarla o reiniciarla cuando quieras.");
+    if (wasAnimating) setSelectorAbierto(true);
+  }
+
+  function resetRandomRound() {
+    continuousRunningRef.current = false;
+    randomSelector.resetContinuousRound();
+    setSelectionAnimation(null);
+    setSelectorMessage("Ronda reiniciada. Todo el alumnado presente vuelve a estar disponible.");
+  }
+
+  function openStudentFromClassroom(student: typeof alumnos[number]) {
+    modalOriginRef.current = "classroom";
+    postActionFlowRef.current = null;
+    actionCompletionGuardRef.current.reset();
+    setSeleccionado(student);
+  }
+
+  function closeStudentModal() {
+    const origin = modalOriginRef.current;
+    postActionFlowRef.current = null;
+    modalOriginRef.current = "classroom";
+    setSeleccionado(null);
+
+    if (origin === "continuous") {
+      continuousRunningRef.current = false;
+      randomSelector.stopContinuousRound();
+      setSelectorMessage("Ronda pausada. Puedes continuarla cuando quieras.");
+    }
+  }
+
+  function handleActionAppliedSuccessfully() {
+    if (!seleccionado) return;
+
+    const origin = modalOriginRef.current;
+    const completedStudentId = seleccionado.id;
+    const expectedFlow = postActionFlowRef.current
+      ?? resolveRandomSelectionActionFlow(
+        origin,
+        true,
+        continuousRunningRef.current
+      );
+    const completedFlow = actionCompletionGuardRef.current.complete(expectedFlow);
+    if (completedFlow === "ignored") return;
+
+    const remainingStudentCount = origin === "continuous"
+      ? randomSelector.availableStudentIds.filter(
+          (studentId) => studentId !== completedStudentId
+        ).length
+      : 0;
+
+    if (origin === "continuous") {
+      randomSelector.recordSelection(completedStudentId);
+    }
+
+    postActionFlowRef.current = null;
+    modalOriginRef.current = "classroom";
+    setSeleccionado(null);
+
+    if (
+      continuousRunningRef.current
+      && shouldStartNextRandomSelection(completedFlow, remainingStudentCount)
+    ) {
+      beginRandomSelection("continuous", completedStudentId);
+    } else if (origin === "continuous" && remainingStudentCount === 0) {
+      continuousRunningRef.current = false;
+      randomSelector.stopContinuousRound();
+      setSelectorMessage("Ronda terminada: todo el alumnado presente ha participado.");
+      setSelectorAbierto(true);
     }
   }
 
   const selectedStudentIsAbsent = seleccionado
     ? !canApplyStudentActionToday(attendance.day, seleccionado.id)
     : false;
+
+  useEffect(() => {
+    if (
+      !seleccionado
+      || modalOriginRef.current === "classroom"
+      || !attendance.isHydrated
+      || !selectedStudentIsAbsent
+    ) {
+      return;
+    }
+
+    const shouldContinue = modalOriginRef.current === "continuous"
+      && continuousRunningRef.current;
+    modalOriginRef.current = "classroom";
+    postActionFlowRef.current = null;
+    setSeleccionado(null);
+    setSelectorMessage("El alumno seleccionado figura ahora como ausente.");
+    if (shouldContinue) beginRandomSelectionRef.current("continuous");
+  }, [attendance.isHydrated, seleccionado, selectedStudentIsAbsent, setSeleccionado]);
 
   return (
     <main className="h-dvh overflow-y-auto bg-[#e8f3f6] text-slate-950">
@@ -124,7 +350,15 @@ export default function Home() {
         <div className="absolute inset-0 opacity-40 [background-image:radial-gradient(circle_at_center,rgba(255,255,255,.9)_0_1px,transparent_1.5px)] [background-size:42px_42px]" />
       </div>
 
-      <ClassroomContextNavigation onOpenAttendance={() => setAsistenciaAbierta(true)} />
+      <ClassroomContextNavigation
+        onOpenAttendance={() => setAsistenciaAbierta(true)}
+        onStartRandomSingle={() => beginRandomSelection(
+          getRandomSelectionModeForAccess("random")
+        )}
+        onStartRandomRound={() => beginRandomSelection(
+          getRandomSelectionModeForAccess("round")
+        )}
+      />
 
       <div className="relative mx-auto flex min-h-full w-full max-w-[1920px] flex-col px-4 pb-8 sm:px-6 lg:px-8">
         <header className="sticky top-0 z-40 flex shrink-0 items-center justify-between gap-4 border-b border-cyan-900/10 bg-[#edf7f8]/85 py-3 backdrop-blur-md sm:py-4">
@@ -155,7 +389,7 @@ export default function Home() {
               }`}>
                 <StudentCard
                   alumno={alumno}
-                  onClick={() => setSeleccionado(alumno)}
+                  onClick={() => openStudentFromClassroom(alumno)}
                   loadGuardianEagerly={index === 0}
                   guardianScale={guardianScale}
                   isAbsent={!canApplyStudentActionToday(attendance.day, alumno.id)}
@@ -194,6 +428,23 @@ export default function Home() {
         />
       )}
 
+      <RandomStudentSelector
+        noticeOpen={selectorAbierto}
+        students={alumnos}
+        presentStudentIds={presentStudentIds}
+        availableStudentIds={randomSelector.availableStudentIds}
+        state={randomSelector.state}
+        isHydrated={attendance.isHydrated && randomSelector.isHydrated}
+        isContinuousRunning={randomSelector.isContinuousRunning}
+        message={selectorMessage}
+        animation={selectionAnimation}
+        onCloseNotice={() => setSelectorAbierto(false)}
+        onContinueContinuous={() => beginRandomSelection("continuous")}
+        onStopContinuous={stopRandomRound}
+        onResetContinuous={resetRandomRound}
+        onAnimationComplete={completeRandomSelection}
+      />
+
       {seleccionado && (
         <StudentModal
           alumno={seleccionado}
@@ -202,8 +453,9 @@ export default function Home() {
           onSoundEnabledChange={setSoundEnabled}
           actionsDisabled={!attendance.isHydrated || selectedStudentIsAbsent}
           studentIsAbsent={selectedStudentIsAbsent}
-          onCerrar={() => setSeleccionado(null)}
+          onCerrar={closeStudentModal}
           onAccion={ejecutarAccion}
+          onActionAppliedSuccessfully={handleActionAppliedSuccessfully}
           onStudentUpdated={guardarAlumno}
         />
       )}

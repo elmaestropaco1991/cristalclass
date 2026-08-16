@@ -39,10 +39,11 @@ type Props = {
   studentIsAbsent: boolean;
   onCerrar: () => void;
   onAccion: (actionId: ActionType) => Promise<boolean>;
+  onActionAppliedSuccessfully: () => void;
   onStudentUpdated: (student: Student) => void;
 };
 
-export default function StudentModal({ alumno, movements, soundEnabled, onSoundEnabledChange, actionsDisabled, studentIsAbsent, onCerrar, onAccion, onStudentUpdated }: Props) {
+export default function StudentModal({ alumno, movements, soundEnabled, onSoundEnabledChange, actionsDisabled, studentIsAbsent, onCerrar, onAccion, onActionAppliedSuccessfully, onStudentUpdated }: Props) {
   const [additionalActionsOpen, setAdditionalActionsOpen] = useState(false);
   const [coleccionAbierta, setColeccionAbierta] = useState(false);
   const [cofreAbierto, setCofreAbierto] = useState(false);
@@ -64,7 +65,12 @@ export default function StudentModal({ alumno, movements, soundEnabled, onSoundE
   }, [pendingChestCount]);
 
   const handleClose = () => {
-    if (!actionGuardRef.current.isProcessing) onCerrar();
+    if (
+      !actionGuardRef.current.isProcessing
+      && !isApplyingAction
+    ) {
+      onCerrar();
+    }
   };
 
   const startChestOpening = () => {
@@ -85,7 +91,9 @@ export default function StudentModal({ alumno, movements, soundEnabled, onSoundE
   };
 
   const handleAction = async (actionId: ActionType): Promise<boolean> => {
-    if (actionsDisabled || actionGuardRef.current.isProcessing) return false;
+    if (actionsDisabled || isApplyingAction || actionGuardRef.current.isProcessing) {
+      return false;
+    }
 
     const actionPoints = actionCatalog.find((action) => action.id === actionId)?.points ?? 0;
     if (soundEnabled && actionPoints !== 0) prepareActionAudio();
@@ -98,7 +106,7 @@ export default function StudentModal({ alumno, movements, soundEnabled, onSoundE
       if (shouldRequestActionSound(actionPoints, soundEnabled, true)) {
         playActionSound(actionPoints);
       }
-      onCerrar();
+      onActionAppliedSuccessfully();
       return true;
     }
 
