@@ -11,6 +11,12 @@ import {
 } from "./curriculumFingerprintService";
 import { validateCurriculumData } from "./curriculumValidationService";
 
+// Pure sizing mirror for callers that must budget before this service writes.
+export {
+  CURRICULUM_STORAGE_PROTOCOL_SIZE_SEMANTICS,
+  estimateCurriculumStorageProtocolPeak,
+} from "./curriculumStorageBudgetService";
+
 export const CURRICULUM_STORAGE_SCHEMA_VERSION = 1 as const;
 const CURRICULUM_STORAGE_PREFIX = "cristalclass_curriculum_v1";
 
