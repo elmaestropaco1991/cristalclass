@@ -21,6 +21,11 @@ export interface CurriculumProvenance {
 export interface Criterion {
   readonly id: string;
   readonly externalCode?: string;
+  /**
+   * Source catalog version. Legacy `Action.attitudinalCriterionLinks.catalogVersion`
+   * is matched against this field, never against the editor revision. In a manual
+   * pack it records the `packageVersion` that last changed this criterion content.
+   */
   readonly sourceVersion?: string;
   readonly title?: string;
   readonly text: string;
@@ -29,6 +34,11 @@ export interface Criterion {
 export interface BasicKnowledge {
   readonly id: string;
   readonly externalCode?: string;
+  /**
+   * Source catalog version; in a manual pack it records the `packageVersion` that
+   * last changed this knowledge text or its criterion relations.
+   */
+  readonly sourceVersion?: string;
   readonly text: string;
   readonly criterionIds: readonly string[];
 }
@@ -45,6 +55,7 @@ export interface CurriculumSubject {
 export interface CurriculumPack {
   readonly id: string;
   readonly schemaVersion: number;
+  /** Portable label identifying the complete package snapshot. */
   readonly packageVersion: string;
   readonly name: string;
   readonly region?: string;
@@ -216,3 +227,289 @@ export interface CurriculumStorageReviewMetadata {
   readonly contentChecksum: string;
   readonly reviewedAt: string;
 }
+
+export interface CurriculumCatalogAppliedOperation {
+  readonly operationId: string;
+  readonly commandFingerprint: string;
+  readonly resultingVersion: number;
+}
+
+export interface CurriculumCatalogEditorState {
+  readonly schemaVersion: number;
+  /** Optimistic-concurrency revision; manual packs encode the same revision as `manual-rN`. */
+  readonly revision: number;
+  readonly pack: CurriculumPack | null;
+  /**
+   * Durable idempotency journal. This phase never prunes it; a future persistence policy
+   * must archive or compact it without losing retry protection.
+   */
+  readonly appliedOperations: readonly CurriculumCatalogAppliedOperation[];
+}
+
+export interface CurriculumCatalogCommandBase {
+  readonly operationId: string;
+  readonly expectedVersion: number;
+  readonly occurredAt: string;
+}
+
+export interface CurriculumCatalogSubjectInput {
+  readonly id: string;
+  readonly name: string;
+  readonly externalCode?: string;
+}
+
+export interface CurriculumCatalogCriterionInput {
+  readonly id: string;
+  readonly externalCode?: string;
+  readonly title?: string;
+  readonly text: string;
+}
+
+export interface CurriculumCatalogBasicKnowledgeInput {
+  readonly id: string;
+  readonly externalCode?: string;
+  readonly text: string;
+  readonly criterionIds: readonly string[];
+}
+
+export type CurriculumCatalogCommand =
+  | (CurriculumCatalogCommandBase & {
+      readonly type: "create-manual-pack";
+      readonly packId: string;
+      readonly name: string;
+      readonly region?: string;
+      readonly scope?: string;
+      readonly stage?: string;
+      readonly course?: string;
+    })
+  | (CurriculumCatalogCommandBase & {
+      readonly type: "update-pack-metadata";
+      readonly packId: string;
+      readonly name: string;
+      readonly region?: string | null;
+      readonly scope?: string | null;
+      readonly stage?: string | null;
+      readonly course?: string | null;
+    })
+  | (CurriculumCatalogCommandBase & {
+      readonly type: "add-subject";
+      readonly packId: string;
+      readonly subject: CurriculumCatalogSubjectInput;
+    })
+  | (CurriculumCatalogCommandBase & {
+      readonly type: "update-subject";
+      readonly packId: string;
+      readonly subjectId: string;
+      readonly name: string;
+      readonly externalCode?: string | null;
+    })
+  | (CurriculumCatalogCommandBase & {
+      readonly type: "reorder-subjects";
+      readonly packId: string;
+      readonly subjectIds: readonly string[];
+    })
+  | (CurriculumCatalogCommandBase & {
+      readonly type: "add-criterion";
+      readonly packId: string;
+      readonly subjectId: string;
+      readonly criterion: CurriculumCatalogCriterionInput;
+    })
+  | (CurriculumCatalogCommandBase & {
+      readonly type: "update-criterion";
+      readonly packId: string;
+      readonly subjectId: string;
+      readonly criterionId: string;
+      readonly externalCode?: string | null;
+      readonly title?: string | null;
+      readonly text: string;
+    })
+  | (CurriculumCatalogCommandBase & {
+      readonly type: "reorder-criteria";
+      readonly packId: string;
+      readonly subjectId: string;
+      readonly criterionIds: readonly string[];
+    })
+  | (CurriculumCatalogCommandBase & {
+      readonly type: "add-basic-knowledge";
+      readonly packId: string;
+      readonly subjectId: string;
+      readonly basicKnowledge: CurriculumCatalogBasicKnowledgeInput;
+    })
+  | (CurriculumCatalogCommandBase & {
+      readonly type: "update-basic-knowledge";
+      readonly packId: string;
+      readonly subjectId: string;
+      readonly basicKnowledgeId: string;
+      readonly externalCode?: string | null;
+      readonly text: string;
+    })
+  | (CurriculumCatalogCommandBase & {
+      readonly type: "set-basic-knowledge-criteria";
+      readonly packId: string;
+      readonly subjectId: string;
+      readonly basicKnowledgeId: string;
+      readonly criterionIds: readonly string[];
+    })
+  | (CurriculumCatalogCommandBase & {
+      readonly type: "reorder-basic-knowledge";
+      readonly packId: string;
+      readonly subjectId: string;
+      readonly basicKnowledgeIds: readonly string[];
+    })
+  | (CurriculumCatalogCommandBase & {
+      readonly type: "request-remove-subject";
+      readonly packId: string;
+      readonly subjectId: string;
+    })
+  | (CurriculumCatalogCommandBase & {
+      readonly type: "request-remove-criterion";
+      readonly packId: string;
+      readonly subjectId: string;
+      readonly criterionId: string;
+    })
+  | (CurriculumCatalogCommandBase & {
+      readonly type: "request-remove-basic-knowledge";
+      readonly packId: string;
+      readonly subjectId: string;
+      readonly basicKnowledgeId: string;
+    });
+
+export type CurriculumCatalogEntityType =
+  | "pack"
+  | "subject"
+  | "criterion"
+  | "basic-knowledge";
+
+export interface CurriculumCatalogAffectedEntity {
+  readonly entityType: CurriculumCatalogEntityType;
+  readonly entityId: string;
+}
+
+export type CurriculumCatalogDependencyKind =
+  | "contained-criterion"
+  | "contained-basic-knowledge"
+  | "knowledge-criterion"
+  | "profile-subject"
+  | "action-link-subject"
+  | "action-link-criterion"
+  | "action-link-basic-knowledge"
+  | "ordinary-tracking-subject"
+  | "ordinary-tracking-basic-knowledge";
+
+export type CurriculumCatalogDependencyOrigin =
+  | "catalog"
+  | "profiles"
+  | "action-links"
+  | "ordinary-tracking";
+
+export interface CurriculumCatalogDependency {
+  readonly kind: CurriculumCatalogDependencyKind;
+  readonly origin: CurriculumCatalogDependencyOrigin;
+  readonly sourceId: string;
+  readonly targetId: string;
+  readonly path: string;
+  readonly message: string;
+}
+
+export type CurriculumCatalogWarningCode =
+  | "duplicate-subject-name"
+  | "duplicate-criterion-text"
+  | "duplicate-basic-knowledge-text"
+  | "no-content-change";
+
+export interface CurriculumCatalogWarning {
+  readonly code: CurriculumCatalogWarningCode;
+  readonly path: string;
+  readonly message: string;
+}
+
+export type CurriculumCatalogConflictCode =
+  | "invalid-state"
+  | "invalid-operation-id"
+  | "invalid-date"
+  | "stale-version"
+  | "operation-id-collision"
+  | "pack-already-exists"
+  | "pack-not-found"
+  | "pack-id-mismatch"
+  | "entity-not-found"
+  | "duplicate-id"
+  | "duplicate-external-code"
+  | "invalid-name"
+  | "invalid-text"
+  | "missing-criterion"
+  | "criterion-from-another-subject"
+  | "invalid-order"
+  | "dependency-blocking"
+  | "dependency-context-incomplete"
+  | "decision-required"
+  | "invalid-result";
+
+export interface CurriculumCatalogConflict {
+  readonly code: CurriculumCatalogConflictCode;
+  readonly path: string;
+  readonly message: string;
+}
+
+export interface CurriculumCatalogChange {
+  readonly kind: "create" | "update" | "reorder" | "request-removal";
+  readonly entityType: CurriculumCatalogEntityType;
+  readonly entityId: string;
+  readonly before: unknown | null;
+  readonly after: unknown | null;
+}
+
+export type CurriculumCatalogDependencySource =
+  | "profiles"
+  | "action-links"
+  | "ordinary-tracking";
+
+export interface CurriculumCatalogDependencyContext {
+  /** Sources the caller explicitly loaded completely for this preview. */
+  readonly inspectedSources: readonly CurriculumCatalogDependencySource[];
+  readonly profiles?: readonly CurriculumProfile[];
+  readonly actionLinks?: readonly ActionCurricularLink[];
+}
+
+export interface CurriculumCatalogCommandPreview {
+  readonly status: "applicable" | "blocked" | "idempotent";
+  readonly operationId: string;
+  readonly commandFingerprint: string;
+  readonly expectedVersion: number;
+  readonly resultingVersion: number;
+  readonly proposedPack: CurriculumPack | null;
+  readonly changes: readonly CurriculumCatalogChange[];
+  readonly affectedEntities: readonly CurriculumCatalogAffectedEntity[];
+  readonly dependencies: readonly CurriculumCatalogDependency[];
+  readonly warnings: readonly CurriculumCatalogWarning[];
+  readonly conflicts: readonly CurriculumCatalogConflict[];
+  readonly canApply: boolean;
+  readonly summary: {
+    readonly title: string;
+    readonly message: string;
+    readonly changeCount: number;
+    readonly dependencyCount: number;
+    readonly warningCount: number;
+    readonly conflictCount: number;
+  };
+}
+
+export type CurriculumCatalogApplyResult =
+  | {
+      readonly status: "applied";
+      readonly state: CurriculumCatalogEditorState;
+      readonly pack: CurriculumPack;
+      readonly preview: CurriculumCatalogCommandPreview;
+    }
+  | {
+      readonly status: "idempotent";
+      readonly state: CurriculumCatalogEditorState;
+      readonly pack: CurriculumPack | null;
+      readonly preview: CurriculumCatalogCommandPreview;
+    }
+  | {
+      readonly status: "rejected";
+      readonly reason: "blocked" | "invalid-state";
+      readonly state: CurriculumCatalogEditorState;
+      readonly preview: CurriculumCatalogCommandPreview;
+    };
