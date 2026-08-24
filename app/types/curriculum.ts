@@ -164,3 +164,55 @@ export interface CurriculumMigrationResult {
   readonly conflicts: readonly CurriculumMigrationConflict[];
   readonly appliedAt: string | null;
 }
+
+export interface CurriculumStorageEnvelope {
+  readonly schemaVersion: number;
+  readonly classroomId: string;
+  readonly revision: number;
+  readonly curriculumData: VersionedCurriculumData;
+  readonly writtenAt: string;
+  readonly contentChecksum: string;
+  readonly lastOperationId: string;
+}
+
+export type CurriculumStorageOperationKind = "migration" | "rollback";
+export type CurriculumStorageTransactionStage =
+  | "prepared"
+  | "backup-saved"
+  | "promoted"
+  | "reviewed";
+
+export interface CurriculumStorageTransaction {
+  readonly schemaVersion: number;
+  readonly classroomId: string;
+  readonly transactionId: string;
+  readonly operationId: string;
+  readonly operationKind: CurriculumStorageOperationKind;
+  readonly expectedRevision: number;
+  readonly targetRevision: number;
+  readonly targetEnvelope: CurriculumStorageEnvelope;
+  readonly backupKey: string;
+  readonly preparedAt: string;
+  readonly stage: CurriculumStorageTransactionStage;
+}
+
+export interface CurriculumStorageBackup {
+  readonly schemaVersion: number;
+  readonly classroomId: string;
+  readonly backupId: string;
+  readonly transactionId: string;
+  readonly sourceRevision: number;
+  readonly targetRevision: number;
+  readonly previousEnvelope: CurriculumStorageEnvelope | null;
+  readonly createdAt: string;
+}
+
+export interface CurriculumStorageReviewMetadata {
+  readonly schemaVersion: number;
+  readonly classroomId: string;
+  readonly revision: number;
+  readonly operationId: string;
+  readonly operationKind: CurriculumStorageOperationKind;
+  readonly contentChecksum: string;
+  readonly reviewedAt: string;
+}
