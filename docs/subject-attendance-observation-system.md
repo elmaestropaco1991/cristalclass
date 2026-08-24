@@ -1,658 +1,712 @@
-# Sistema de asignaturas, asistencia y sesiones de observación
+# Sistema opcional de asignaturas, asistencia y seguimiento curricular
 
-## Estado y alcance
+## Estado, alcance y principio de producto
 
-Este documento define el próximo sistema de asignaturas, acciones contextualizadas, asistencia y observación actitudinal de CristalClass. Es una especificación funcional y técnica previa a la implementación.
+Este documento define la evolución de CristalClass desde su funcionamiento actual como gestor general de aula hacia un módulo **opcional** de asignaturas y seguimiento curricular. La asistencia forma parte del gestor general y no depende de ese módulo.
 
-No forma parte de este alcance evaluar contenidos, exámenes ni el dominio completo de criterios de evaluación. Tampoco se modifican las reglas actuales de cristales, progresión, cofres, recompensas, guardianes, equipamiento o colección.
+CristalClass funciona por defecto con:
 
-Las decisiones marcadas como **cerradas** deben conservarse durante la implementación. Las cuestiones marcadas como **pendientes** necesitan una decisión explícita antes de cerrar la fase correspondiente.
+- acciones;
+- cristales;
+- cofres;
+- guardianes, equipamiento y colección;
+- historial de movimientos;
+- asistencia diaria.
 
-## 1. Encaje con la arquitectura actual
+Sin activar el módulo curricular:
 
-### 1.1 Estado operativo real
+- no aparecen pestañas de asignaturas;
+- no existen sesiones por asignatura;
+- no se generan evidencias curriculares;
+- no aparecen horario ni ambientaciones por asignatura;
+- no se muestra ningún aviso de evaluación pendiente.
 
-La aplicación actual es un cliente Next.js sin backend operativo ni capa de repositorios conectada. El estado funcional se distribuye así:
+La única opción de producto será:
+
+> Activar asignaturas y seguimiento curricular
+
+La activación engloba asignaturas, navegación por pestañas, sesiones, horario, ambientación, saberes, criterios y evidencias curriculares. No es posible completarla hasta configurar al menos una asignatura. Desactivar posteriormente el módulo lo oculta y pausa, pero no elimina configuraciones, relaciones ni evidencias.
+
+CristalClass registra observaciones actitudinales que el docente puede combinar con otros instrumentos. No evalúa contenidos, exámenes ni el dominio completo de un criterio. Tampoco modifica por esta vía las reglas de cristales, máximo histórico, progresión, cofres, recompensas, guardianes, equipamiento o colección.
+
+La calificación descrita en este documento es una arquitectura futura y no está implementada. Cuando exista, CristalClass calculará automáticamente resultados estrictamente a partir de las evidencias observadas por la aplicación; no afirmará evaluar componentes de un criterio que no haya observado.
+
+Las decisiones indicadas como **definitivas** son reglas de producto y arquitectura. Las funciones descritas como **futuras** no deben presentarse en la interfaz ni en la documentación de usuario como ya disponibles.
+
+## 1. Estado real de la arquitectura
+
+### 1.1 Estado operativo
+
+La aplicación actual es un cliente Next.js sin backend operativo. Sus principales almacenes locales son:
 
 | Área | Modelo o servicio actual | Persistencia actual |
 | --- | --- | --- |
 | Alumnos, cristales, máximo histórico, cofres, inventario y equipamiento | `app/types/student.ts`, `useStudents`, `studentService`, `storageService` | `localStorage`: `cristalclass_students` |
 | Acciones configurables | `app/types/action.ts`, servicios `actionCatalog*`, `ActionEditor` | `localStorage`: `cristalclass_actions` |
-| Historial de acciones aplicadas | `app/types/movement.ts`, `useMovements`, `movementService` | `localStorage`: `cristalclass_movements` |
+| Historial de acciones | `app/types/movement.ts`, `useMovements`, `movementService` | `localStorage`: `cristalclass_movements` |
+| Asistencia diaria | `app/types/attendance.ts`, `useAttendance`, servicios `attendance*` | `localStorage`, clave versionada por clase y fecha local |
 | Preferencia de sonido | `useSoundPreference`, `soundPreferenceService` | `localStorage`: `cristalclass_sound_enabled` |
-| Tamaño de guardianes por clase | `useClassroomGuardianScale`, `classroomAppearancePreferenceService` | `localStorage`, clave derivada de la clase |
+| Tamaño de guardianes | `useClassroomGuardianScale`, `classroomAppearancePreferenceService` | `localStorage`, clave derivada de la clase |
 
-El tipo operativo `app/types/student.ts` incluye `claseId`, pero los datos iniciales lo dejan vacío y la cabecera muestra de forma fija `4º Primaria A`. La función de la pantalla principal utiliza un identificador de respaldo cuando no encuentra una clase real.
+El tipo operativo de alumno contiene `claseId`, pero los datos heredados pueden dejarlo vacío. Mientras no exista una entidad de clase fiable, `classroomIdentityService` usa un respaldo explícito y determinista. Ese respaldo es suficiente para la persistencia local actual, pero no constituye identidad multiusuario ni sustituye una futura clase de servidor.
 
-El modelo de acciones actual contiene identificador estable, nombre, puntos con signo, icono, estado archivado y posición rápida. El tipo positivo o negativo se deriva del signo de `points`; el editor presenta tipo y magnitud por separado, pero guarda un único valor firmado. No existen campos de asignatura, criterio o seguimiento por ausencia de incidencias.
+`domain/` y `application/` esbozan límites futuros —agregados, comandos, eventos, transacciones y módulos— que todavía no sustituyen el flujo local. `createLegacyApplyStudentAction` continúa coordinando el efecto económico y el movimiento histórico. Una futura integración curricular debe extender esos límites, no crear un segundo mecanismo de aplicación de acciones.
 
-Cada aplicación manual de una acción:
+### 1.2 Fases implementadas
 
-1. crea un `ApplyStudentActionCommand`;
-2. usa temporalmente `createLegacyApplyStudentAction`;
-3. modifica los cristales y el progreso de cofres;
-4. registra un `Movement` con `actionId`, título, cambio solicitado, cambio aplicado, fecha y tipo;
-5. devuelve eventos descriptivos: `teacher-action-applied`, `economy-crystals-changed`, posibles `student-chest-obtained` y `student-movement-recorded`.
+Las tres primeras fases ya existen y deben conservar su compatibilidad:
 
-El comando ya contiene `teacherId`, destino, fecha, clave de idempotencia y metadatos. En la implementación actual, el docente es el marcador `legacy-local-teacher` y `classroomId` procede del alumno seleccionado.
+1. **Contratos y catálogo provisional de asignaturas.** Existen `SubjectDefinition`, identificadores estables, un catálogo inicial de siete contextos y normalizadores de acciones heredadas.
+2. **Acciones contextualizadas.** El editor y los servicios admiten `subjectId`, `availableInAllSubjects`, `attitudinalCriterionLinks` y `trackOrdinaryCompliance`. Estos campos preparan compatibilidad, pero parte de ellos son provisionales respecto al modelo definitivo descrito aquí.
+3. **Asistencia independiente.** Todo alumno se interpreta presente por defecto; se persisten excepciones por clase y fecha local; se admiten ausencia, llegada, corrección a presente y corrección de hora. La asistencia bloquea funcionalmente acciones económicas mientras el alumno está ausente, sin convertirse en una acción ni modificar cristales.
 
-### 1.2 Arquitectura futura ya esbozada
+### 1.3 Funciones aún no implementadas
 
-`domain/` y `application/` contienen contratos futuros que todavía no sustituyen al estado operativo:
+Todavía no existen como funciones completas:
 
-- `domain/classroom/Classroom.ts` define clase, docentes y alumnado por identificadores.
-- `domain/student/Student.ts` define un agregado canónico futuro y declara expresamente que aún no sustituye a `app/types/student.ts`.
-- `TeacherCommand`, `DomainEvent`, `Transaction`, `DomainEventBus` y `ModuleRegistry` ofrecen límites adecuados para comandos idempotentes, eventos correlacionados y escrituras atómicas.
-- `ApplyStudentAction` es el único punto de escritura previsto para acciones docentes, pero actualmente delega en un puente local.
-
-Este sistema debe extender esos límites, no crear un segundo flujo paralelo de acciones.
-
-### 1.3 Ausencias reales en el proyecto
-
-No se han encontrado estructuras operativas de:
-
-- catálogo de asignaturas;
-- asignatura activa;
-- asistencia diaria o intervalos de presencia;
+- activación o desactivación del módulo curricular;
+- perfiles o paquetes curriculares importables;
+- editor de criterios y saberes;
+- asistente de activación;
+- pestañas académicas visibles y asignatura activa;
 - sesiones de observación;
-- horario semanal;
-- criterios actitudinales;
-- evidencias separadas de los movimientos de cristales;
-- repositorios de servidor, autenticación docente o transacciones persistentes reales.
+- cálculo de oportunidades reales de observación;
+- evidencias curriculares;
+- cumplimiento ordinario;
+- cálculo de Nota general CristalClass y notas por criterio;
+- snapshots reproducibles de periodos cerrados;
+- horario académico y ambientaciones por asignatura;
+- importadores y exportadores curriculares;
+- persistencia de servidor, autenticación docente o transacciones persistentes reales.
 
-Los archivos `.js` y `.ts` duplicados en parte de `domain/` son un residuo técnico que deberá vigilarse para evitar resoluciones ambiguas, pero su limpieza no forma parte de este sistema.
+La pestaña fija de Asistencia sí está implementada y permanece disponible aunque el módulo curricular esté desactivado.
+
+## 2. Decisiones anteriores sustituidas
+
+Las siguientes decisiones del diseño anterior quedan sustituidas de forma explícita:
+
+| Decisión anterior | Decisión definitiva |
+| --- | --- |
+| Mostrar siempre General, siete asignaturas y Asistencia en el lateral. | Sin módulo curricular solo aparece Asistencia. Las pestañas académicas aparecen únicamente después de una activación válida y nunca vacías. |
+| Seleccionar cualquier asignatura inicia siempre una sesión. | Solo puede iniciarse una sesión cuando el módulo está activo, la asignatura está configurada y el docente entra en su contexto. |
+| Mantener un catálogo curricular cerrado dentro de CristalClass. | El núcleo usa un modelo neutral. Los catálogos son manuales, importados, externos o compartidos y se distribuyen como paquetes versionados independientes. |
+| Limitar el catálogo a criterios actitudinales mantenidos por CristalClass. | El docente controla el currículo activo; CristalClass conserva relaciones y evidencias actitudinales sin afirmar dominio completo. |
+| Guardar las relaciones curriculares directamente dentro de `Action`. | Los campos actuales son provisionales. El modelo definitivo separa las relaciones en `ActionCurricularLink`. |
+| Relacionar una acción directamente con un criterio como flujo principal. | El flujo conceptual definitivo es `Acción → Saber → uno o varios criterios`. |
+| Tratar el catálogo fijo de siete asignaturas como definitivo. | Es un catálogo provisional y migrable. Sus identificadores deben conservarse mediante migración compatible, nunca mediante eliminación destructiva. |
+| Continuar tras la Fase 3 directamente con sesión activa y cumplimiento. | Antes se construyen los contratos del módulo opcional, el importador/editor y el asistente de activación. |
+| Que la conducta ordinaria no aportase peso positivo curricular. | Una oportunidad ordinaria válida aporta un peso positivo interno fijo de `+1`, sin movimiento económico. |
+| Niveles cualitativos como único resultado curricular. | CristalClass calcula una nota numérica exacta por criterio, con trazabilidad y alcance actitudinal explícito. |
+| Permitir que cada docente configure fórmulas, normalizaciones o equivalencias curriculares. | La fórmula es única; el valor de cristales de cada acción determina su peso y no existe un configurador adicional. |
+| Normalizar automáticamente respecto al mejor alumno de la clase. | No existe normalización respecto al grupo: cada resultado depende solo de sus pesos positivos y contrarios. |
+| Generar una nota actitudinal media de asignatura. | No se genera media actitudinal de asignatura: se calcula una nota independiente por cada criterio vinculado. |
+| Usar el saldo actual de cristales como base de una calificación. | Solo cuentan movimientos explícitos de comportamiento o evidencias curriculares; el saldo actual nunca es la base de la nota. |
+
+Permanecen vigentes la separación entre economía, asistencia y observación; la estabilidad de identificadores; la idempotencia; la fecha local de asistencia; y la prohibición de inferir contexto curricular retroactivo.
+
+## 3. Módulo curricular opcional
 
-## 2. Finalidad y separación de responsabilidades
+### 3.1 Estados conceptuales
 
-### Decisiones cerradas
+El módulo debe distinguir al menos:
 
-- CristalClass registra comportamientos y actitudes observables.
-- CristalClass no evalúa contenidos, pruebas, exámenes ni la adquisición completa de criterios.
-- Los cristales pertenecen al sistema de motivación.
-- Las evidencias actitudinales pertenecen al sistema de observación.
-- Una misma acción docente puede originar ambos resultados, pero deben persistirse y consultarse por separado.
-- La asistencia no es una acción, no altera cristales y no se vincula a criterios.
-- El cumplimiento ordinario no concede cristales, no genera cofres y no se presenta como una acción positiva manual.
+- `disabled`: experiencia general de aula, sin superficies curriculares;
+- `configuring`: configuración incompleta y todavía no activable;
+- `enabled`: currículo válido, asignaturas seleccionadas y funciones curriculares disponibles;
+- `paused`: equivalente visualmente a desactivado, pero con toda la configuración y evidencias conservadas.
+
+Los nombres son conceptuales y no fijan todavía el contrato TypeScript. La interfaz puede representar `paused` mediante la misma opción de activación, siempre que no confunda pausa con borrado.
+
+### 3.2 Invariantes definitivas
 
-### Consecuencia técnica
+- La opción visible es **Activar asignaturas y seguimiento curricular**.
+- La activación no se confirma sin al menos una asignatura configurada.
+- No se muestran pestañas vacías ni contextos sin configuración útil.
+- Desactivar oculta pestañas, sesiones, horario, ambientación y avisos curriculares.
+- Desactivar no elimina currículos, relaciones, sesiones cerradas ni evidencias.
+- Mientras está desactivado no se generan nuevas evidencias ni sesiones curriculares.
+- La asistencia sigue visible, operativa e independiente en todos los estados.
+- Las acciones generales, cristales, cofres, guardianes e historial siguen funcionando sin módulo curricular.
+- No aparece ningún aviso de evaluación pendiente cuando el módulo está desactivado.
+- Reanudar utiliza la misma configuración, salvo que una migración versionada requiera revisión explícita.
 
-El comando de aplicar una acción puede conservar una única intención del docente y una única correlación, pero sus efectos deben dividirse en módulos o eventos diferentes:
+## 4. Modelo curricular neutral futuro
 
-- efecto económico: cambio de cristales y progresión existente;
-- registro histórico compatible: movimiento actual;
-- evidencia actitudinal: observación contextualizada por asignatura, sesión y criterio opcional.
+Este apartado define conceptos, no una implementación ya existente.
 
-Una avería o reintento no puede confirmar uno de esos efectos y duplicar u omitir otro. En producción, la escritura requiere una transacción de servidor y una clave de idempotencia efectiva.
+### 4.1 `CurriculumPack` y `CurriculumProfile`
 
-## 3. Asignaturas y contexto activo
+`CurriculumPack` representa un paquete portable y versionado:
 
-### 3.1 Catálogo inicial
+- identificador interno estable;
+- versión de esquema y versión del contenido;
+- nombre, descripción y autor o procedencia;
+- metadatos opcionales de territorio, etapa, curso e idioma;
+- asignaturas curriculares;
+- criterios y saberes;
+- información de licencia o atribución cuando proceda;
+- huella o identidad de importación para detectar duplicados.
 
-La navegación lateral incluirá:
+`CurriculumProfile` representa la configuración activa o preparada para una clase:
 
-- General;
-- Lengua;
-- Matemáticas;
-- Conocimiento del Medio;
-- Inglés;
-- Música;
-- Educación Artística;
-- Asistencia, como pestaña fija separada;
-- futuras asignaturas añadidas al catálogo.
+- identificador estable del perfil;
+- clase destinataria;
+- paquete de origen opcional;
+- asignaturas seleccionadas;
+- adaptaciones y elementos creados manualmente;
+- estado de activación;
+- versión de esquema;
+- marcas de revisión y actualización.
 
-Cada asignatura tendrá identificador estable, nombre e icono. La identificación nunca dependerá únicamente del color.
+Un perfil puede originarse manualmente, por importación, por un catálogo externo disponible o por reutilización de una configuración compartida. El núcleo no debe exigir comunidad autónoma ni proveedor concreto.
 
-### 3.2 Presentación
+### 4.2 `CurriculumSubject`
 
-La asignatura activa debe mostrarse siempre mediante nombre e icono. El contexto puede aplicar color de acento, degradado ambiental y motivos tenues, con una transición de 250 a 350 ms.
+Representa una asignatura dentro de un perfil o paquete:
 
-No cambiarán los significados visuales de cristales, cofres, guardianes ni controles positivos o negativos. La ambientación es contextual y ligera; no redefine el lenguaje visual global.
+- identificador interno estable;
+- identificador del perfil o paquete;
+- nombre e icono;
+- código externo opcional;
+- orden y estado activo;
+- metadatos opcionales de curso, etapa o territorio;
+- referencia compatible al `SubjectDefinition` provisional cuando exista correspondencia.
 
-### 3.3 Comportamiento
+Dos paquetes pueden describir asignaturas semejantes sin compartir necesariamente el mismo identificador externo. Las equivalencias deben resolverse mediante una migración o una decisión explícita, no por comparar solo el nombre.
 
-- Seleccionar una asignatura académica inicia una sesión de observación.
-- Cambiar a otra asignatura cierra la sesión anterior, calcula sus resultados, abre la nueva y ofrece temporalmente **Deshacer**.
-- Abrir Asistencia no inicia una sesión académica.
-- La cabecera muestra de forma discreta `Asignatura · sesión en curso · alumnado presente`.
+### 4.3 `Criterion`
 
-**Pendiente:** decidir si entrar en Asistencia mantiene la sesión académica en curso, la pausa visualmente o solicita cerrarla. El requisito solo establece que Asistencia no inicia una sesión nueva.
+Un criterio contiene:
 
-## 4. Acciones por asignatura
+- identificador interno estable;
+- identificador de asignatura curricular;
+- código externo opcional;
+- título;
+- texto;
+- versión o procedencia;
+- estado activo o retirado sin pérdida histórica.
 
-### 4.1 Alcance de una acción
+El identificador interno es la referencia persistente. El código oficial o externo puede cambiar, faltar o repetirse entre paquetes y por ello no puede ser la única clave.
 
-Cada acción tendrá exactamente uno de estos contextos:
+### 4.4 `BasicKnowledge` o `Saber`
 
-1. `general`: acción general;
-2. `subject`: acción de una asignatura concreta;
-3. `all-subjects`: excepcionalmente disponible en todas las asignaturas.
+Un saber contiene:
 
-Cuando Música esté activa, el modal mostrará acciones de Música, acciones generales que se decida incluir en ese contexto y acciones globales. Una acción exclusiva de Música, como `Toca la flauta sin permiso`, no aparecerá en Lengua.
+- identificador interno estable;
+- identificador de asignatura curricular;
+- código externo opcional;
+- texto;
+- varios `criterionIds` de la misma asignatura curricular;
+- versión o procedencia;
+- estado activo o retirado.
 
-**Pendiente:** confirmar si las acciones `general` deben aparecer dentro de todas las asignaturas académicas o solo cuando la pestaña General esté activa. No debe confundirse `general` con `all-subjects`.
+El modelo admite varios criterios por saber desde el inicio aunque la interfaz pueda ofrecer una edición progresiva.
 
-### 4.2 Editor
+### 4.5 `ActionCurricularLink`
 
-El editor conservará sus campos actuales y añadirá:
+La relación curricular se almacena separada de `Action` y contiene conceptualmente:
 
-- nombre;
-- icono;
-- valor en cristales;
-- tipo positivo o negativo;
-- asignatura o contexto;
-- disponibilidad global, cuando proceda;
-- relación curricular actitudinal opcional;
-- seguimiento por ausencia de incidencias, solo cuando proceda.
+- identificador estable de la relación;
+- `actionId` global;
+- identificador del perfil y de la asignatura curricular;
+- uno o varios `basicKnowledgeIds`;
+- `evidenceEffect`;
+- `recordingMode`;
+- configuración opcional de seguimiento ordinario;
+- configuración opcional de acciones contrarias;
+- versión de esquema y procedencia.
 
-El identificador de una acción seguirá siendo estable. Editar, archivar o migrar una acción no romperá movimientos históricos.
+Una acción global puede tener relaciones distintas según asignatura y perfil activo. La acción conserva nombre, icono, puntos, archivo y posición rápida; no posee ni duplica los textos oficiales.
 
-El modelo debe imponer estas invariantes:
+### 4.6 `EvidenceEffect` y `RecordingMode`
 
-- los puntos son un entero distinto de cero entre -99 y 99, mientras esa regla actual siga vigente;
-- una acción archivada no se ofrece en consultas operativas;
-- las posiciones rápidas continúan siendo únicas;
-- `trackOrdinaryCompliance` solo puede activarse en acciones negativas elegibles;
-- una acción de asignatura solo puede vincular criterios de esa misma asignatura y curso;
-- la interfaz inicial permite seleccionar como máximo un criterio principal.
+`EvidenceEffect` expresa cómo contribuye una observación actitudinal:
 
-**Pendiente:** decidir si el tipo se almacena explícitamente o continúa derivándose del signo de los puntos. No deben existir dos fuentes de verdad que puedan contradecirse.
+- `positive`: evidencia favorable;
+- `contrary`: incidencia contraria al comportamiento esperado.
 
-### 4.3 Compatibilidad
+`RecordingMode` expresa cómo puede originarse:
 
-Toda acción almacenada sin contexto se hidratará como `general`. La migración será aditiva: no cambiará identificadores, puntos, iconos, archivo ni posición rápida. Las acciones existentes seguirán funcionando antes de que el docente las edite.
+- `manual`: solo mediante una acción explícita del docente;
+- `ordinary`: resumen de una oportunidad real sin la incidencia contraria configurada.
 
-## 5. Criterios de evaluación actitudinales
+La configuración ordinaria debe identificar la regla, las acciones contrarias relevantes y las condiciones de oportunidad. No se deduce automáticamente de que una acción tenga puntos negativos. Debe habilitarse expresamente por el docente.
 
-### Decisiones cerradas
+### 4.7 Flujo curricular
 
-- El catálogo será cerrado y mantenido por CristalClass.
-- Estará filtrado por curso y asignatura.
-- Solo contendrá criterios con aspectos actitudinales observables relevantes.
-- El docente no verá el currículo completo ni redactará criterios libres en la primera versión.
-- La vinculación será opcional.
-- Vincular un criterio no cambia los cristales ni calcula una nota.
-- Una evidencia no afirma que el criterio esté superado.
-- La interfaz inicial permitirá un criterio principal.
-- El modelo podrá admitir varios criterios sin exponer todavía una interfaz compleja.
+El flujo definitivo es:
 
-El evento de observación debe guardar una referencia estable al criterio y una instantánea mínima de su código o versión. Así, una actualización futura del catálogo no reescribe el significado histórico de una evidencia.
+> Acción → Saber → uno o varios criterios
 
-**Pendientes:** fuente oficial, versionado y proceso editorial del catálogo; cursos iniciales; tratamiento de criterios retirados; texto legal o curricular que deba conservarse como instantánea.
+Una acción no demuestra por sí sola el dominio de un saber o criterio. Una evidencia conserva referencias estables, versión y una instantánea mínima suficiente para interpretar el historial aunque el catálogo evolucione.
 
-## 6. Cumplimiento ordinario sin registro manual
+### 4.8 Evidencia curricular y snapshot histórico
 
-El seguimiento automático se limita a acciones negativas que expresan el incumplimiento de una norma ordinaria. En el editor se presentará:
+Cada evidencia futura será un acontecimiento independiente, no una modificación retrospectiva de la acción ni del movimiento económico. Debe conservar, como mínimo:
 
-> Contabilizar las sesiones sin esta incidencia
+- identificador estable de evidencia;
+- `actionId` cuando procede de una acción explícita;
+- identificador de movimiento cuando existe efecto económico asociado;
+- `studentId` y `classroomId`;
+- `subjectId` y `sessionId` cuando proceden;
+- fecha, hora y zona temporal inequívocas;
+- `criterionIds` ya resueltos y deduplicados;
+- efecto positivo o contrario;
+- peso positivo o contrario aplicado;
+- valor de cristales de la acción en el instante de registro;
+- origen `manual` u `ordinary`;
+- versión de relación curricular, catálogo y esquema necesarias para auditoría.
 
-con la explicación:
+El snapshot de cristales es obligatorio para evidencias explícitas. Si una acción cambia posteriormente de `−1` a `−2`, las evidencias anteriores conservan peso contrario `1` y las posteriores usan `2`. Los cambios de catálogo o de acción nunca recalculan silenciosamente notas ya registradas ni periodos cerrados.
 
-> Si el alumno está presente y no se registra esta conducta durante una sesión válida, CristalClass contará la sesión como cumplimiento ordinario. No concede cristales.
+Una evidencia ordinaria conserva el mismo nivel de trazabilidad, pero su peso interno es siempre positivo `+1`, no contiene movimiento económico y referencia la oportunidad o sesión que la produjo.
 
-Ejemplo:
+## 5. Evidencias y seguimiento ordinario
 
-- incidencia manual: `Toca la flauta sin permiso`;
-- cumplimiento ordinario interno: `Respeta cuándo debe tocar`.
+### 5.1 Separación estricta
 
-Al cerrar una sesión válida, el sistema calcula para cada acción elegible y alumno participante:
+- Los cristales pertenecen al sistema motivacional.
+- Los movimientos registran el efecto económico actual.
+- La asistencia registra presencia y retrasos.
+- Las evidencias pertenecen al seguimiento curricular opcional.
+- Una misma intención manual puede correlacionar efectos, pero nunca fusionarlos en una sola entidad.
+- La asistencia, el cumplimiento ordinario y una evidencia por sí sola nunca conceden cristales, generan cofres ni alteran progresión.
 
-- número de incidencias manuales de esa acción;
-- si existió una oportunidad válida de observación;
-- resumen de cumplimiento ordinario cuando no hubo incidencia.
+En una futura versión de servidor, una aplicación manual que produzca efecto económico y evidencia necesitará transacción e idempotencia reales. Mientras esa infraestructura no exista, no debe presentarse una garantía distribuida ficticia.
 
-El resultado debe agregarse como resumen, no como una avalancha de movimientos positivos visibles. Debe permitir expresiones como `1 incidencia en 20 sesiones observadas`.
+### 5.2 Reglas de evidencia ordinaria
 
-No se habilitará para positivos especiales, entre ellos ayuda espontánea, aportación excelente o creatividad.
+La observabilidad ordinaria se configura una sola vez por conducta y asignatura dentro de la relación curricular. No se confirma alumno por alumno durante la sesión.
 
-**Pendientes:** duración o proporción mínima de presencia para considerar una oportunidad real; tratamiento de una llegada en los últimos minutos; si determinadas acciones necesitan una marca explícita del docente indicando que hubo oportunidad de observación.
+Una sesión puede generar evidencia ordinaria únicamente si concurren todas estas condiciones:
 
-## 7. Asistencia
+- el docente inició realmente la sesión;
+- la sesión es válida y supera una duración mínima razonable, definida y versionada antes de su implementación;
+- el alumno estaba presente durante la oportunidad aplicable;
+- la conducta está configurada como habitualmente observable en esa asignatura;
+- el docente no marcó el control discreto **No evaluar esta sesión**;
+- existió una oportunidad real de observación;
+- no existe ya en esa sesión una acción explícita vinculada al mismo criterio para ese alumno.
 
-### 7.1 Modelo funcional
+La evidencia ordinaria:
 
-Cada jornada comienza con todo el alumnado activo presente por defecto. El docente marca únicamente ausencias y puede seleccionar varios alumnos.
+- aporta un peso positivo interno fijo de `+1`;
+- no concede cristales ni crea movimientos económicos;
+- se genera como máximo una vez por alumno, criterio y sesión;
+- no se genera para alumnado ausente, sesiones no evaluables o sesiones sin oportunidad real;
+- no demuestra el dominio completo del criterio;
+- se agrega como resumen para evitar una avalancha de eventos positivos visibles.
 
-Cada alumno mantiene dos conceptos distintos:
+La ausencia de una acción contraria solo puede interpretarse cuando la sesión, la presencia y la configuración prueban que existió una oportunidad real. La duración mínima y la definición operativa de oportunidad siguen siendo decisiones de dominio pendientes, pero deben quedar fijadas y versionadas antes de generar evidencia.
 
-- estado actual: `present` o `absent`;
-- resultado diario: `present`, `absent` o `late`.
+### 5.3 Acciones explícitas y deduplicación curricular
 
-Cuando un alumno ausente llega, la acción **Ha llegado ahora**:
+Una acción explícita registrada conserva su efecto económico actual y, cuando el módulo curricular está activo y la relación lo permite, genera una evidencia manual separada. Su peso curricular es el valor absoluto de sus cristales en el momento de registrarse:
 
-1. registra la hora real;
-2. permite corregirla;
-3. cierra el intervalo de ausencia;
-4. cambia el estado actual a presente;
-5. conserva el resultado diario como retraso.
+- `+1` aporta peso positivo `1`;
+- `+2` aporta peso positivo `2`;
+- `−1` aporta peso contrario `1`;
+- `−3` aporta peso contrario `3`.
 
-Si no llega, termina el día como ausente. El historial conserva intervalos, no solo un resultado final.
+El signo determina si la evidencia es positiva o contraria. Dos acciones de `+1` pesan igual y una de `+2` pesa el doble. No existen escalas configurables, equivalencias docentes, pesos independientes de los cristales ni normalización contra el mejor resultado del grupo.
 
-La asistencia no entrega ni retira cristales, no crea cofres, no es un comportamiento y no se relaciona con criterios. Su única relación con observación es determinar cuándo un alumno pudo participar.
+Una acción puede llegar a varios criterios mediante varios saberes. Para cada criterio resuelto cuenta como máximo una vez: las rutas técnicas se deduplican antes de persistir la evidencia. Por ejemplo, una acción `−2` vinculada a tres criterios aporta peso contrario `2` a cada uno; no aporta `−6` dentro de un único criterio.
 
-### 7.2 Casos necesarios
+Una única acción se conserva como un acontecimiento con varias relaciones curriculares, no como copias económicas ni como varias acciones independientes. Varias acciones explícitas legítimas registradas durante una sesión sí permanecen como evidencias distintas para el mismo criterio. Se impiden el doble clic, los reintentos técnicos, las rutas curriculares repetidas y la evidencia ordinaria adicional de esa sesión para ese criterio.
 
-- ausencia desde el inicio y llegada posterior;
-- ausencia durante toda la jornada;
-- corrección de una hora de llegada;
-- salida durante la jornada, con hora registrada;
-- regreso posterior si el producto decide admitir varios intervalos;
-- alumno incorporado o desactivado a mitad de curso;
-- selección múltiple sin duplicar intervalos;
-- cambio de fecha y zona horaria local.
+### 5.4 Dos formas futuras de calificación
 
-**Pendientes:** flujo exacto para registrar salidas; admisión de varios intervalos de presencia en un mismo día; responsable y trazabilidad de correcciones; momento explícito de cierre de la jornada.
+#### Sin módulo curricular: Nota general CristalClass
 
-## 8. Sesiones de observación
+Mientras el módulo curricular esté desactivado, CristalClass funciona como gestor general de aula y podrá entregar una única **Nota general CristalClass** por alumno y periodo seleccionado:
 
-### 8.1 Inicio, validez y cierre
+> Nota general CristalClass = `P / (P + N) × 10`
 
-Una sesión comienza al seleccionar una asignatura académica. General debe tratarse como contexto observable si se utiliza para aplicar acciones generales.
+Donde `P` es la suma de valores positivos y `N` la suma de valores absolutos negativos de movimientos explícitos cuyo origen sea una acción de comportamiento. No se utiliza el saldo actual del alumno.
 
-Una sesión es válida cuando cumple al menos una condición:
+Se excluyen cofres, compras, equipamiento, compañeros, recompensas no conductuales, ajustes técnicos o administrativos de saldo y cualquier movimiento económico sin origen en una acción de comportamiento. Si `P + N = 0`, no existe nota calculable y se muestra **Sin evidencias**, nunca `0`.
 
-- dura 10 minutos o más;
-- contiene al menos una acción registrada manualmente.
+#### Con módulo curricular: nota exacta por criterio
 
-Una selección inferior a 10 minutos y sin acciones se descarta sin generar cumplimiento ordinario.
+Con el módulo activo no existe una media actitudinal por asignatura. CristalClass podrá calcular una nota independiente para cada criterio vinculado y periodo seleccionado:
 
-Al cambiar de asignatura:
+> Nota del criterio = `P / (P + N) × 10`
 
-1. se fija el final y la última actividad fiable;
-2. se determina si la sesión es válida o descartada;
-3. se calculan participantes e incidencias elegibles;
-4. se guarda el resumen de cumplimiento ordinario;
-5. se abre la nueva sesión;
-6. se ofrece **Deshacer** durante un periodo breve.
+Aquí `P` y `N` proceden exclusivamente de evidencias deduplicadas del criterio: acciones explícitas con su snapshot histórico y, cuando corresponda, evidencia ordinaria válida de peso `+1`. Cada resultado debe explicar peso positivo, peso contrario, oportunidades observadas, evidencias utilizadas, periodo y trazabilidad del cálculo.
 
-### 8.2 Participación
+Dentro de CristalClass puede presentarse como nota del criterio. En informes y exportaciones se identifica como **`[Código del criterio] · Nota CristalClass`**. Esa etiqueta comunica su origen automático y actitudinal, sin presentarla como evaluación completa de todos los componentes del criterio.
 
-La participación se calcula por intersección entre el intervalo de la sesión y los intervalos reales de presencia:
+### 5.5 Periodos, provisionalidad y cierre
 
-- presente desde el inicio: participa desde el comienzo;
-- ausente durante toda la sesión: queda excluido;
-- llegada tardía: participa desde la llegada;
-- salida: deja de participar desde la hora registrada.
+- Si `P + N = 0`, el resultado es **Sin evidencias**.
+- Con menos de tres oportunidades válidas, la nota es visible pero se marca como provisional.
+- A partir de tres oportunidades válidas, la nota se muestra sin marca de provisionalidad.
+- Ausencias y sesiones no evaluables no alteran numerador ni denominador.
+- Todas las notas se calculan por el periodo seleccionado, no sobre el saldo ni toda la vida del alumno por defecto.
+- Cerrar un periodo conserva un snapshot reproducible de entradas, pesos, oportunidades, fórmula, catálogo y resultado.
+- Reabrir o corregir un periodo exige una operación explícita y trazable.
+- Cambiar después una acción, relación o catálogo nunca recalcula silenciosamente un periodo cerrado.
 
-No se debe inferir presencia retroactiva a partir del resultado diario final.
+CristalClass calcula y explica estos resultados de forma automática. El docente no elige fórmulas, normalizaciones, porcentajes ni equivalencias numéricas. La responsabilidad docente sigue siendo combinar esta información con instrumentos que observen aspectos fuera del alcance de la aplicación.
 
-### 8.3 Recuperación e interrupciones
+## 6. Catálogos curriculares desacoplados
 
-La sesión activa y su última actividad fiable se guardan continuamente. Tras un cierre brusco, la aplicación ofrece:
+### 6.1 Decisión definitiva
 
-- cerrar en la última actividad;
-- continuar;
-- descartar.
+CristalClass no incorporará rígidamente y de forma obligatoria los currículos de todas las comunidades autónomas. El docente podrá:
 
-La opción recomendada será cerrar en la última actividad. Nunca se contará automáticamente todo el tiempo hasta la reapertura.
+- crear un currículo manualmente;
+- importar un catálogo;
+- utilizar un catálogo externo disponible;
+- compartir y reutilizar configuraciones.
 
-Tras 90 minutos, la sesión deja de extenderse automáticamente y pregunta si continúa. Sin respuesta, solo se conserva hasta la última actividad fiable.
+Los catálogos por comunidad, etapa, curso o asignatura son paquetes versionados independientes del núcleo. Pueden distribuirse y actualizarse sin exigir una versión nueva de toda la aplicación, siempre con compatibilidad de esquema y procedencia visible.
 
-Después de cerrar una sesión existe una opción temporal para deshacer. Deshacer debe ser idempotente y no duplicar evidencias, sesiones o resúmenes.
+### 6.2 Catálogo provisional actual
 
-**Pendientes:** duración exacta de la ventana de deshacer; definición exhaustiva de `última actividad fiable`; comportamiento ante suspensión del dispositivo, cambio manual del reloj o dos pestañas abiertas; condiciones que convierten una sesión en `pending-review`.
+El catálogo fijo de General, Lengua, Matemáticas, Conocimiento del Medio, Inglés, Música y Educación Artística pertenece a las fases 1 y 2. Es provisional:
 
-## 9. Horario opcional
+- sus identificadores existentes se conservan;
+- las acciones ya asignadas continúan funcionando;
+- puede servir como origen para crear un perfil inicial;
+- no obliga a mostrar pestañas mientras el módulo esté desactivado;
+- se migra de forma aditiva hacia `CurriculumSubject`;
+- nunca se elimina destructivamente para imponer el modelo nuevo.
 
-El horario semanal es una ayuda y nunca una fuente automática de observaciones.
+## 7. Asistente de activación futuro
 
-No selecciona asignaturas, no inicia sesiones, no genera evidencias y no genera cumplimiento ordinario.
+El asistente sigue este orden:
 
-Diez minutos después de la hora prevista puede sugerir:
+1. El docente elige **Activar asignaturas y seguimiento curricular**.
+2. Crea un currículo manual o importa un paquete.
+3. Selecciona al menos una asignatura.
+4. Introduce o revisa sus criterios.
+5. Introduce saberes y relaciona cada saber con uno o varios criterios.
+6. Vincula acciones globales a los saberes pertinentes y decide efecto y modo de registro.
+7. Revisa un resumen de asignaturas, relaciones, advertencias y conflictos.
+8. Activa el módulo.
 
-> Según tu horario, ahora corresponde Matemáticas
+Reglas del asistente:
 
-con las opciones:
+- no crea sesiones ni evidencias durante la configuración;
+- no permite activar con cero asignaturas;
+- no muestra pestañas vacías;
+- valida identificadores, relaciones cruzadas y duplicados antes de confirmar;
+- permite guardar un borrador sin activar;
+- diferencia errores bloqueantes de advertencias revisables;
+- una importación siempre presenta previsualización y resumen de cambios;
+- cancelar no altera la configuración activa.
 
-- cambiar a Matemáticas;
-- mantener la asignatura actual;
-- omitir esta sesión.
+## 8. Importación, exportación y portabilidad
 
-Si se rechaza, no vuelve a preguntar en ese tramo. El modelo contemplará modificaciones puntuales y días especiales sin sobrescribir el horario semanal. El margen podrá configurarse posteriormente en 5, 10 o 15 minutos.
+### 8.1 Modelo interno independiente
 
-**Pendientes:** catálogo de tramos, zona horaria, calendario de días no lectivos, prioridad entre excepción y horario semanal y alcance por docente o por clase.
+CristalClass mantiene su propio esquema versionado y adaptadores específicos para aplicaciones externas. Ningún formato de iDoceo, Additio o Excel se convierte en el modelo interno canónico.
 
-## 10. Flujos principales
+Se distinguen dos productos exportables:
 
-### 10.1 Aplicar una acción durante una sesión
+1. **Configuración curricular:** asignaturas, criterios, saberes, relaciones y metadatos.
+2. **Resultados, evidencias y snapshots:** cálculos reproducibles, observaciones agregadas o detalladas y su trazabilidad.
 
-1. El docente selecciona una asignatura y existe una sesión activa.
-2. Abre `StudentModal` desde la tarjeta del alumno.
-3. El modal consulta acciones activas compatibles con el contexto.
-4. El docente aplica una acción una sola vez.
-5. El comando incluye `classroomId`, `subjectId`, `sessionId`, `teacherId` y clave de idempotencia.
-6. El módulo económico aplica el cambio actual de cristales y cofres.
-7. El módulo de observación registra evidencia actitudinal si corresponde.
-8. El historial conserva instantáneas suficientes aunque la acción se edite después.
-9. Ambos resultados comparten correlación, pero no una misma entidad ni una misma consulta.
+Sin módulo curricular se exporta por alumno y periodo la **Nota general CristalClass**, `P`, `N` y el número de acciones consideradas. Con módulo curricular se exporta una columna o resultado por criterio con su código, descripción, **Nota CristalClass**, `P`, `N`, oportunidades observadas y periodo.
 
-### 10.2 Pasar lista y registrar una llegada
+Las notas exportadas son resultados calculados automáticamente a partir de la parte observada por CristalClass. Ninguna exportación las presenta como una calificación completa del criterio ni sustituye pruebas, producciones, rúbricas u otros instrumentos.
 
-1. Se abre Asistencia sin iniciar una sesión académica.
-2. Todo alumno activo parte como presente.
-3. El docente marca ausencias, individualmente o en lote.
-4. Una llegada cierra el intervalo de ausencia con hora real editable.
-5. Las sesiones posteriores calculan participación desde esa hora.
+### 8.2 Exportadores iniciales
 
-### 10.3 Cambiar de asignatura
+#### iDoceo
 
-1. Se solicita el cambio.
-2. Se cierra atómicamente la sesión anterior.
-3. Se descarta si es breve y no contiene acciones; en caso contrario se resume.
-4. Se abre la nueva sesión.
-5. La interfaz actualiza nombre, icono y ambientación.
-6. Se ofrece deshacer sin duplicar resultados.
+- XLSX de criterios con códigos únicos dentro del archivo y descripciones comprensibles;
+- XLSX de resultados con una fila por alumno;
+- sin módulo: columnas `Nota general CristalClass`, `P`, `N`, acciones consideradas y periodo;
+- con módulo: columnas por criterio rotuladas como `[Código del criterio] · Nota CristalClass`, junto a `P`, `N`, oportunidades observadas y periodo;
+- exportación combinada o separada por asignatura;
+- nombres de hojas y códigos validados para evitar colisiones;
+- previsualización del alcance antes de descargar.
 
-### 10.4 Recuperar una sesión interrumpida
+#### Additio
 
-1. Al arrancar se detecta una sesión `active` sin cierre fiable.
-2. Se muestra la última actividad fiable y las tres opciones.
-3. Cerrar usa esa marca temporal; continuar reanuda desde el momento actual sin rellenar el hueco; descartar no genera cumplimiento.
+- Excel de criterios;
+- Excel de alumnos, columnas y resultados;
+- distinción entre la nota general sin módulo y las notas por criterio con módulo;
+- adaptación configurable del formato del nombre para facilitar coincidencias;
+- estructura compatible con la importación curricular disponible en su versión web;
+- informe de alumnos no emparejados sin sobrescritura automática.
 
-### 10.5 Casos límite
+#### Excel universal
 
-- Una selección de asignatura inferior a 10 minutos y sin acciones se descarta sin generar cumplimiento ordinario.
-- Una sesión inferior a 10 minutos que sí contiene una acción manual es válida y conserva esa observación.
-- Un alumno ausente durante toda la sesión no participa ni suma una oportunidad de cumplimiento ordinario.
-- Un alumno que llega tarde solo participa desde la hora de llegada corregida; el intervalo anterior permanece ausente.
-- Una salida durante la jornada debe cerrar su intervalo de presencia. El flujo exacto para salidas y múltiples intervalos sigue pendiente.
-- Cambiar de asignatura cierra una sesión antes de abrir la siguiente; deshacer no puede duplicar acciones, evidencias ni resúmenes.
-- Un cierre brusco nunca rellena como observación el tiempo hasta la reapertura. Se usa la última actividad fiable o se solicita revisión.
-- Al alcanzar 90 minutos, la sesión deja de extenderse automáticamente; sin confirmación se conserva solo hasta la última actividad fiable.
-- Rechazar una sugerencia del horario impide repetirla durante ese tramo, sin cambiar la asignatura ni crear sesión.
-- Una acción heredada sin asignatura se interpreta como `general`; no se le atribuyen retrospectivamente asignatura, sesión o criterio.
-- Editar, archivar o eliminar una acción no altera el significado histórico: los registros conservan su instantánea.
-- Dos pestañas o dispositivos no deben cerrar o resumir dos veces la misma sesión. La resolución concreta exige versión, idempotencia y persistencia de servidor.
+- libros legibles sin depender de una aplicación concreta;
+- hojas separadas para metadatos, criterios, alumnado y resultados cuando proceda;
+- códigos estables y encabezados explícitos;
+- fechas y zonas horarias inequívocas;
+- resultados generales con `P`, `N`, acciones y periodo; o resultados por criterio con `P`, `N`, oportunidades y periodo;
+- sin fórmulas ocultas que cambien el significado exportado.
 
-## 11. Modelo de datos propuesto
+#### JSON de CristalClass
 
-Los nombres son orientativos y no fijan tecnología de base de datos. Los identificadores deben ser estables y las fechas deben persistirse en UTC, conservando la zona horaria necesaria para jornadas y horarios.
+- esquema y versión de contenido explícitos;
+- identificadores internos estables;
+- procedencia y metadatos del paquete;
+- importación idempotente;
+- detección de duplicados y conflictos;
+- previsualización antes de aplicar;
+- nunca sobrescritura silenciosa;
+- posibilidad de exportar configuración sin datos personales;
+- separación inequívoca entre configuración y resultados;
+- evidencias y snapshots de periodo suficientes para reproducir cada cálculo exportado.
 
-### 11.1 Entidades de referencia
+### 8.3 Importación segura
 
-`Subject`
+Una importación debe clasificar cada elemento como nuevo, idéntico, actualizable o conflictivo. Repetir el mismo archivo no duplica asignaturas, criterios, saberes ni relaciones. Ante un conflicto, el docente elige conservar, importar como copia o resolver una correspondencia; ninguna lectura o previsualización escribe por sí sola.
 
-- `id`
-- `key`
-- `name`
-- `iconId`
-- `themeToken`
-- `active`
+### 8.4 Referencias documentales
 
-`AttitudinalCriterion`
+- [iDoceo: importación general](https://idoceo.net/es/index.php/en/instructions/howto/idoceoimport)
+- [iDoceo: importar estándares](https://idoceo.net/es/index.php/en/instructions/gradebook/import-standards)
+- [iDoceo: competencias clave](https://idoceo.net/es/index.php/en/instructions/uncategorised/key-skills)
+- [Additio: importar alumnos y calificaciones](https://help.additioapp.com/en/import-students-grades)
+- [Additio: evaluación competencial y criterios](https://help.additioapp.com/evaluaci%C3%B3n-competencial-los-criterios-de-evaluaci%C3%B3n)
 
-- `id`
-- `courseId`
-- `subjectId`
-- `code`
-- `wording`
-- `catalogVersion`
-- `active`
+Estas referencias orientan adaptadores de intercambio; no convierten sus formatos en contratos internos.
 
-### 11.2 Acción ampliada
+## 9. Asistencia independiente
 
-`ActionDefinition`
+### 9.1 Comportamiento implementado
 
-- campos actuales: `id`, `title`, `points`, icono, archivo y posición rápida;
-- `scopeKind`: `general`, `subject` o `all-subjects`;
-- `subjectId`, obligatorio solo para `subject`;
-- `criterionIds`, colección preparada para varios elementos;
+Todo alumno activo se interpreta presente si no existe registro explícito. La jornada usa fecha local y zona horaria del usuario. Las operaciones implementadas son:
+
+- presente implícito o explícito;
+- marcar ausente individualmente o en lote;
+- **Ha llegado ahora**, con instante real y resultado de retraso;
+- corregir hora de llegada sin duplicar el registro;
+- corregir a presente eliminando una ausencia o retraso falso;
+- normalización tolerante y persistencia versionada por clase y fecha;
+- bloqueo visual y funcional de acciones económicas mientras el estado actual es ausente.
+
+La asistencia no usa `ApplyStudentAction`, no crea movimientos y no modifica cristales, cofres, máximo histórico, progresión ni relaciones curriculares.
+
+### 9.2 Relación futura con sesiones
+
+Cuando existan sesiones, la asistencia solo determinará elegibilidad y oportunidad:
+
+- un alumno ausente no genera evidencia ordinaria;
+- una llegada permite participar desde su hora efectiva;
+- no se infiere presencia retroactiva a partir del resultado final del día;
+- una corrección horaria obliga a recalcular de forma determinista cualquier participación derivada.
+
+Las salidas anticipadas y múltiples intervalos diarios no están implementados ni forman parte del contrato actual. Si se incorporan, requerirán una fase y transiciones explícitas; no deben inferirse del modelo existente.
+
+## 10. Sesiones, navegación y horario futuros
+
+Una sesión solo podrá comenzar si:
+
+- el módulo curricular está activo;
+- la asignatura pertenece al perfil activo;
+- el docente entra explícitamente en ese contexto;
+- no existe un conflicto de sesión que requiera cierre o recuperación.
+
+Abrir Asistencia no inicia una sesión académica. El comportamiento de una sesión ya activa al abrir Asistencia —mantener, pausar visualmente o solicitar cierre— debe resolverse antes de implementar navegación académica.
+
+La propuesta anterior de considerar válida una sesión de 10 minutos o con al menos una acción queda sustituida para la evidencia ordinaria: una acción explícita por sí sola no acredita oportunidad real y una sesión debe superar una duración mínima razonable previamente definida y versionada. Diez minutos puede evaluarse como posible valor inicial, pero no está implementado ni fijado. También siguen pendientes la última actividad fiable, recuperación tras cierre brusco, límite de sesión, deshacer y concurrencia entre pestañas.
+
+El horario es opcional y solo sugiere contextos. Nunca selecciona una asignatura, inicia una sesión, genera evidencias o registra cumplimiento sin confirmación. Al desactivar el módulo curricular, horario, sugerencias y ambientaciones desaparecen sin borrar su configuración.
+
+## 11. Migración aditiva y reversible
+
+### 11.1 Campos provisionales actuales
+
+Los campos actuales de `Action`:
+
+- `subjectId`;
+- `availableInAllSubjects`;
+- `attitudinalCriterionLinks`;
 - `trackOrdinaryCompliance`;
-- `ordinaryComplianceLabel`, si el producto decide mostrar una formulación legible.
 
-La UI inicial limita `criterionIds` a cero o un elemento.
+son una base provisional de las fases 1 y 2. Mantienen compatibilidad y permiten experimentar con contexto, pero no representan el modelo curricular neutral definitivo. En particular, una acción no debe conservar textos oficiales ni convertirse en propietaria de criterios.
 
-### 11.3 Asistencia
+### 11.2 Estrategia
 
-`AttendanceDay`
+La migración será aditiva, reversible e iniciada mediante una operación explícita:
 
-- `id`, `classroomId`, `localDate`, `timezone`;
-- estado de la jornada;
-- versión y marcas de creación/actualización.
+1. Conservar todas las acciones, identificadores, iconos, puntos, archivo, posición rápida y estado archivado.
+2. Mantener el gestor general completamente funcional y el módulo curricular desactivado por defecto.
+3. Crear un perfil curricular solo durante configuración o activación explícita.
+4. Convertir el catálogo provisional en asignaturas del perfil mediante correspondencias estables.
+5. Trasladar relaciones provisionales válidas a `ActionCurricularLink` sin borrar inmediatamente los campos heredados.
+6. Marcar conflictos o referencias incompletas para revisión, sin inventar criterios ni saberes.
+7. No reescribir `localStorage` durante una simple lectura, hidratación o previsualización.
+8. Persistir la nueva versión únicamente tras confirmación o guardado explícito.
+9. Conservar evidencias y configuraciones al pausar o desactivar el módulo.
+10. Permitir rollback de la activación sin borrar datos ni revertir acciones económicas.
+11. No inferir asignatura, sesión, saber o criterio para movimientos históricos.
+12. Mantener adaptadores capaces de leer la versión anterior durante una ventana de compatibilidad documentada.
 
-`AttendanceEntry`
+Una migración repetida con la misma versión y origen produce el mismo perfil y las mismas relaciones, sin duplicados.
 
-- `attendanceDayId`, `studentId`;
-- `currentStatus`: presente o ausente;
-- `dailyResult`: presente, ausente o retraso;
-- intervalos de presencia y ausencia;
-- historial mínimo de correcciones y autor.
+## 12. Persistencia y límites de servidor
 
-### 11.4 Sesión y participación
+Mientras la aplicación sea local, cada nuevo almacén debe tener versión, normalización tolerante, claves deterministas y escritura explícita. Los datos desconocidos no deben destruirse al leer una versión anterior.
 
-`ObservationSession`
+En una versión multiusuario deben persistirse en servidor:
 
-- `id`, `classroomId`, `subjectId`, `teacherId`;
-- `startedAt`, `endedAt`, `lastReliableActivityAt`;
-- `status`: activa, válida, descartada o pendiente de revisión;
-- motivo de descarte o revisión;
-- versión e identificador de operación de cierre.
-
-`SessionParticipation`
-
-- `sessionId`, `studentId`;
-- intervalos efectivos dentro de la sesión;
-- duración observada derivada;
-- elegibilidad para cumplimiento ordinario según una regla aún pendiente.
-
-### 11.5 Eventos y resúmenes
-
-`ManualActionObservation`
-
-- `id`, `sessionId`, `studentId`, `actionId`;
-- `occurredAt`, `teacherId`, `subjectId`;
-- instantánea de título y tipo;
-- referencias e instantánea curricular opcional;
-- `correlationId` compartido con el comando y el movimiento económico.
-
-`OrdinaryComplianceSummary`
-
-- `sessionId`, `studentId`, `actionId`;
-- elegibilidad;
-- número de incidencias;
-- resultado resumido;
-- versión de la regla aplicada.
-
-Este resumen no es un `Movement` y no entra en la economía del alumno.
-
-`WeeklySchedule` y `ScheduleException`
-
-- propietario docente o clase, según decisión pendiente;
-- zona horaria;
-- tramos con día, hora y `subjectId`;
-- excepciones fechadas sin mutar la plantilla semanal.
-
-## 12. Servicios y componentes afectados
-
-### Extensiones directas previstas
-
-- `app/types/action.ts`: contexto, criterio y seguimiento automático.
-- `app/services/actionCatalogStorageService.ts`: hidratación compatible con `general`.
-- `app/services/actionCatalogService.ts` y `actionCatalogConfigurationService.ts`: validaciones y consultas por contexto.
-- `app/components/ActionEditor.tsx`: nuevos campos sin romper identificadores ni archivo.
-- `app/components/ActionOrbit.tsx`, `AdditionalActionsPanel.tsx` y `StudentModal.tsx`: catálogo filtrado por contexto activo.
-- `app/page.tsx`: estado de navegación, cabecera contextual y coordinación de sesión.
-- `app/components/Header.tsx`: asignatura, icono, sesión y presentes.
-- `application/commands/ApplyStudentActionCommand.ts`: contexto de sesión, preferiblemente en un payload o metadatos tipados.
-- `application/use-cases/ApplyStudentAction.ts`: coordinación de módulos económico y de observación.
-- `domain/modules/ActionModule.ts`, `Transaction` y `DomainEventBus`: puntos naturales de extensión, todavía sin implementación productiva.
-
-### Nuevas áreas previstas
-
-- catálogo de asignaturas;
-- catálogo versionado de criterios actitudinales;
-- dominio y repositorio de asistencia;
-- dominio y repositorio de sesiones;
-- cálculo puro de participación y cumplimiento ordinario;
-- navegación lateral de asignaturas y vista de Asistencia;
-- recuperación y deshacer de sesiones;
-- horario y excepciones.
-
-Los nombres exactos de archivos nuevos se decidirán por fase; esta especificación no impone una estructura ficticia antes de implementar.
-
-## 13. Estrategia de migración compatible
-
-1. Introducir contratos y validadores sin activar UI nueva.
-2. Hidratar acciones sin contexto como `general`; conservar todos los demás campos.
-3. Mantener movimientos históricos sin `subjectId` ni `sessionId` como registros heredados. No inferirles contexto retroactivamente.
-4. Añadir campos opcionales de contexto a nuevos movimientos solo si algún consumidor actual los necesita; la evidencia completa vivirá separada.
-5. Mantener el puente `createLegacyApplyStudentAction` hasta disponer de repositorios y transacción reales.
-6. Implementar adaptadores de persistencia versionados. La lectura debe aceptar la versión anterior y la escritura no debe destruir datos desconocidos.
-7. Migrar a servidor con identificadores estables y operaciones idempotentes; no copiar ciegamente el `teacherId` de legado como identidad real.
-8. Conservar intactas las reglas de progresión, máximo histórico, cofres e inventario.
-9. No eliminar claves de `localStorage` hasta verificar la migración y disponer de recuperación.
-
-## 14. Persistencia de servidor y preferencias locales
-
-### Debe persistirse en servidor en una versión multiusuario o productiva
-
-- clases, docentes, alumnado e identidad real;
-- catálogo de asignaturas habilitadas por clase;
-- acciones configuradas y su contexto;
-- catálogo/versiones de criterios y vinculaciones;
-- asistencia, intervalos y correcciones;
-- sesiones activas, cerradas, descartadas y pendientes;
-- acciones manuales y evidencias actitudinales;
-- resúmenes de cumplimiento ordinario;
-- horario semanal y excepciones, si deben acompañar al docente entre dispositivos;
+- identidad real de clases, docentes y alumnado;
+- perfiles y paquetes curriculares;
+- asignaturas, criterios, saberes y relaciones;
+- estado de activación del módulo;
+- asistencia y correcciones;
+- sesiones, participaciones y evidencias;
+- configuraciones ordinarias y acciones contrarias;
+- horario y excepciones si deben sincronizarse;
 - claves de idempotencia, versiones y auditoría;
-- cristales, movimientos, cofres e inventario, aunque su migración a servidor sea otro proyecto.
+- economía e inventario, aunque su migración sea un proyecto separado.
 
-Estos datos tienen valor educativo, histórico o de coordinación y no pueden depender de un navegador concreto.
+Son preferencias locales razonables el sonido, reducción de movimiento y apariencia del aula. Una asignatura activa deja de ser una preferencia visual cuando representa una sesión recuperable.
 
-### Puede permanecer como preferencia local
+## 13. Fases de implementación
 
-- sonido de interfaz;
-- tamaño de guardianes por clase mientras no exista perfil sincronizado;
-- preferencias puramente visuales y reducción de movimiento;
-- última pestaña visual cuando no exista una sesión activa;
-- descarte temporal de una sugerencia de horario durante el tramo actual, si no se requiere sincronización entre dispositivos.
+### Fases completadas
 
-La asignatura activa deja de ser una preferencia local en cuanto representa una sesión activa; entonces forma parte del estado persistente y recuperable de sesión.
+1. **Contratos y catálogos provisionales de asignaturas.** Implementada y validada.
+2. **Acciones contextualizadas.** Implementada y validada sobre el contrato provisional.
+3. **Asistencia independiente.** Implementada y validada; no genera evidencias.
 
-## 15. Pruebas deterministas necesarias
+### Fases futuras reordenadas
 
-### Acciones y migración
+4. **Contratos y migración del módulo curricular opcional.** Definir estados, perfiles, paquetes, modelo neutral, relaciones separadas y migración reversible, sin activar UI curricular.
+5. **Importador y editor de catálogos.** Crear, importar, previsualizar, resolver conflictos, versionar y compartir configuraciones.
+6. **Asistente de activación.** Guiar selección, relaciones, validación y activación; impedir pestañas vacías.
+7. **Navegación y sesiones por asignatura.** Añadir contextos activos, validez, participación, recuperación y deshacer sin alterar Asistencia.
+8. **Registro, cálculo y cierre de evidencias curriculares.** Registrar observaciones manuales y ordinarias separadas de la economía, con snapshot histórico de cristales, oportunidad real, exclusión de ausentes, deduplicación, notas exactas y cierre reproducible por periodo.
+9. **Exportación iDoceo, Additio, Excel y JSON.** Separar configuración y resultados; exportar nota general o notas por criterio con pesos, oportunidades, periodo y snapshots, y advertir el alcance actitudinal.
+10. **Horario y sugerencias.** Incorporar ayuda no automática, excepciones y ambientaciones únicamente con el módulo activo.
+11. **Persistencia de servidor posterior.** Añadir identidad, repositorios, transacciones, sincronización, auditoría y resolución de conflictos.
 
-- una acción heredada sin contexto se convierte en `general` sin cambiar ID, puntos o posición;
-- filtros de Música excluyen acciones exclusivas de Lengua y viceversa;
-- `all-subjects` aparece en los contextos permitidos;
-- archivar y restaurar preservan contexto y asociaciones históricas;
-- criterios incompatibles por curso o asignatura se rechazan;
-- el seguimiento ordinario se rechaza para positivos y negativos no elegibles;
-- una pulsación aceptada genera una única aplicación pese a dobles clics.
+Cada fase termina con TypeScript, lint, build, comprobaciones deterministas propias, pruebas de migración sobre copias y verificación de que el gestor general sigue funcionando con el módulo desactivado.
 
-### Separación económica y observacional
+## 14. Criterios de aceptación y comprobaciones deterministas
 
-- una acción correlaciona movimiento económico y evidencia sin fusionarlos;
-- la evidencia no altera por sí misma cristales, cofres o progresión;
-- cumplimiento ordinario y asistencia nunca solicitan sonido de acción ni cambio económico;
-- un reintento idempotente no duplica ningún efecto.
+### 14.1 Activación y desactivación
 
-### Asistencia y participación
+- la instalación o clase nueva empieza con el módulo desactivado;
+- Asistencia permanece disponible;
+- no aparecen pestañas, sesiones, horario, ambientación, evidencias ni avisos curriculares;
+- cero asignaturas impide activar;
+- una asignatura configurada permite completar el asistente;
+- solo aparecen asignaturas seleccionadas y no vacías;
+- desactivar pausa la generación y oculta superficies sin borrar datos;
+- reactivar recupera exactamente el perfil y las evidencias existentes;
+- desactivar nunca cambia cristales, cofres, guardianes o historial.
 
-- presente por defecto;
-- ausencia individual y múltiple;
-- llegada crea retraso y cierra el intervalo correcto;
-- corrección horaria recalcula participación de forma determinista;
-- alumno ausente queda excluido;
-- salida corta participación en la hora registrada;
-- cambios de fecha y zona horaria no desplazan la jornada.
+### 14.2 Importación y duplicados
 
-### Sesiones
+- importar un paquete válido conserva identificadores internos o crea correspondencias explícitas;
+- repetir el mismo paquete es idempotente;
+- códigos iguales de paquetes distintos no se fusionan silenciosamente;
+- elementos idénticos se reconocen sin duplicarse;
+- conflictos se muestran en la previsualización y requieren decisión;
+- cancelar la previsualización no escribe datos;
+- una referencia a criterio de otra asignatura se rechaza;
+- un saber conserva varios `criterionIds` válidos;
+- un paquete incompleto no rompe el perfil activo.
 
-- 9:59 sin acciones se descarta;
-- 10:00 sin acciones es válida;
-- una sesión breve con una acción es válida;
-- cambiar de asignatura cierra una y abre exactamente una;
-- Asistencia no crea sesión académica;
-- cierre abrupto nunca suma el hueco hasta la reapertura;
-- el límite de 90 minutos congela la extensión automática;
-- deshacer restaura el estado anterior sin duplicar resúmenes;
-- dos cierres concurrentes producen un único resultado.
+### 14.3 Migración
 
-### Cumplimiento ordinario
+- una acción heredada conserva ID, nombre, icono, puntos, archivo, orden y posición rápida;
+- una acción sin contexto continúa operativa como general;
+- los siete identificadores provisionales se migran sin eliminación destructiva;
+- las relaciones válidas generan `ActionCurricularLink` una sola vez;
+- relaciones ambiguas quedan pendientes de revisión, no inventadas;
+- leer o previsualizar no reescribe `localStorage`;
+- repetir la migración no duplica perfiles ni relaciones;
+- rollback oculta o pausa el módulo sin borrar configuraciones ni evidencias;
+- movimientos históricos no reciben contexto curricular retroactivo.
 
-- solo se calcula en sesiones válidas;
-- solo para alumnos elegibles y presentes;
-- una incidencia impide contar ausencia de esa incidencia en la misma oportunidad;
-- no crea movimientos positivos visibles;
-- el agregado `1 incidencia en 20 sesiones` es reproducible desde datos persistidos.
+### 14.4 Asistencia y alumnado ausente
 
-### Horario
+- presente implícito y explícito son elegibles para acciones generales;
+- ausente bloquea acciones económicas sin crear movimiento;
+- llegada o corrección a presente desbloquea inmediatamente;
+- alumno ausente queda excluido de participación y evidencia ordinaria;
+- una llegada solo habilita oportunidades posteriores a la hora efectiva;
+- corregir la hora recalcula derivados sin duplicar evidencias;
+- ninguna operación de asistencia modifica economía o currículo.
 
-- una sugerencia no cambia asignatura sin confirmación;
-- no inicia sesiones ni genera evidencias;
-- rechazar silencia el resto del tramo;
-- una excepción puntual no modifica la plantilla semanal.
+### 14.5 Registro manual y ordinario
 
-Las comprobaciones deberían seguir el patrón actual de funciones puras `run*DeterministicChecks`, pero integrarse posteriormente en un comando de pruebas automatizado: hoy existen archivos de comprobación, pero `package.json` no ofrece un script de test que los ejecute todos.
+- una observación manual usa la relación del perfil activo, no campos oficiales embebidos en `Action`;
+- una acción puede resolver relaciones diferentes en dos asignaturas o perfiles;
+- el flujo válido conserva `Acción → Saber → criterios`;
+- una evidencia no modifica cristales ni afirma dominio completo;
+- el registro ordinario está desactivado por defecto;
+- solo una configuración expresa puede habilitarlo;
+- una sesión inválida no genera evidencia ordinaria;
+- una oportunidad real genera como máximo una evidencia ordinaria por alumno, criterio y sesión;
+- **No evaluar esta sesión** excluye toda evidencia ordinaria de esa sesión;
+- una acción contraria configurada impide el resultado ordinario favorable correspondiente;
+- una acción explícita para el mismo criterio y sesión sustituye la evidencia ordinaria;
+- un reintento o cierre concurrente no duplica evidencias;
+- los resúmenes ordinarios tienen peso positivo fijo `+1`, procedencia visible y ningún movimiento económico.
 
-## 16. Fases de implementación pequeñas y verificables
+### 14.6 Cálculo, snapshots y periodos
 
-### Fase 1. Contratos y catálogos
+- `P=12` y `N=3` producen nota `8` tanto para la nota general como para un criterio, si las evidencias pertenecen al periodo;
+- `P=0` y `N=0` producen **Sin evidencias**, nunca una nota `0`;
+- pesos `+1`, `+2`, `−1` y `−3` contribuyen respectivamente `1`, `2`, `1` y `3` según su signo;
+- cambiar posteriormente una acción no altera el snapshot ni la nota de evidencias ya registradas;
+- una evidencia ordinaria aporta solo `+1` interno y no crea movimiento económico;
+- alumnado ausente y sesiones no evaluables quedan excluidos de numerador, denominador y oportunidades;
+- una acción explícita impide añadir además la evidencia ordinaria de esa sesión para el mismo criterio;
+- varias rutas de saberes hacia el mismo criterio no duplican peso;
+- una acción `−2` vinculada a tres criterios aporta peso contrario `2` a cada criterio;
+- cofres, compras, equipamiento, compañeros, recompensas no conductuales y ajustes técnicos quedan excluidos de la nota general;
+- un periodo cerrado puede reproducir exactamente entradas, pesos, oportunidades y resultado;
+- reabrir o corregir un periodo deja trazabilidad y no reescribe silenciosamente el snapshot anterior.
 
-Definir asignaturas, alcance de acciones y criterios actitudinales versionados. Añadir validadores y comprobaciones puras sin cambiar el flujo visible.
+### 14.7 Exportaciones
 
-### Fase 2. Acciones contextualizadas
+- configuración y resultados se exportan por separado;
+- el JSON incluye versión e identificadores estables;
+- exportar e importar la misma configuración conserva relaciones sin duplicados;
+- iDoceo recibe códigos únicos en el archivo y una fila de resultados por alumno;
+- Additio informa coincidencias y alumnos no emparejados;
+- Excel universal mantiene encabezados, fechas y zonas horarias explícitas;
+- las columnas curriculares se identifican como `[Código del criterio] · Nota CristalClass` y declaran su alcance actitudinal;
+- ninguna exportación etiqueta una evidencia como calificación completa del criterio;
+- la exportación por asignatura no mezcla resultados de otra;
+- la exportación general contiene Nota general CristalClass, `P`, `N`, acciones consideradas y periodo;
+- la exportación curricular contiene por criterio código, descripción, Nota CristalClass, `P`, `N`, oportunidades y periodo;
+- el JSON contiene las evidencias y snapshots necesarios para reproducir los cálculos;
+- exportar no modifica el estado interno.
 
-Migrar acciones heredadas a General, ampliar el editor y filtrar catálogos en el modal. Verificar que cristales, movimientos y acciones rápidas siguen funcionando igual.
+## 15. Riesgos y contradicciones abiertas
 
-### Fase 3. Asistencia independiente
+1. **Campos provisionales frente al modelo neutral.** `Action.subjectId`, `availableInAllSubjects`, `attitudinalCriterionLinks` y `trackOrdinaryCompliance` ya están persistidos. Deben convivir temporalmente con `ActionCurricularLink` sin crear dos fuentes activas de verdad.
+2. **Catálogo fijo frente a configuración libre.** Los siete identificadores actuales están en datos y servicios. Ocultarlos o migrarlos es distinto de eliminarlos; una sustitución destructiva rompería acciones locales.
+3. **Identidad de clase incompleta.** El respaldo actual es determinista, pero insuficiente para importar, compartir o sincronizar perfiles entre usuarios.
+4. **Persistencia local fragmentada.** Acciones, movimientos, asistencia y futuros perfiles usan almacenes distintos. La atomicidad real requiere servidor.
+5. **Definición de oportunidad real.** Sin una regla explícita y versionada, el seguimiento ordinario puede convertir falta de observación en evidencia favorable.
+6. **Clasificación fiable de orígenes.** La nota general exige distinguir movimientos explícitos de comportamiento de cofres, compras, recompensas y ajustes técnicos; esa procedencia debe ser estable antes de calcular resultados históricos.
+7. **Correspondencias externas.** Nombres, códigos y estructuras de iDoceo, Additio o paquetes regionales pueden colisionar; los adaptadores necesitan previsualización y resolución de conflictos.
+8. **Datos personales en exportaciones.** Los resultados requieren controles de alcance, privacidad, acceso, rectificación y retención antes de un uso productivo.
+9. **Versionado legal y curricular.** Un catálogo retirado no puede reescribir evidencias históricas; deben conservarse versión, procedencia e instantáneas mínimas.
+10. **Sesiones aún no definidas por completo.** Validez, duración mínima razonable, oportunidad, interrupciones, concurrencia, deshacer y comportamiento al abrir Asistencia deben cerrarse antes de registrar evidencias ordinarias.
+11. **Cierre de periodos.** Deben concretarse identidad de periodo, permisos locales de reapertura, formato de snapshot y trazabilidad de correcciones antes de presentar calificaciones como resultados estables.
+12. **Pruebas no orquestadas.** Existen comprobaciones deterministas por servicio, pero falta un comando único que ejecute todas las suites en integración continua.
 
-Crear jornada, estados, intervalos, selección múltiple y llegada tardía. Sin conectar todavía cumplimiento automático.
+## 16. Decisiones pendientes antes de cada fase
 
-### Fase 4. Sesión activa y cambio de asignatura
+Aunque la opcionalidad, neutralidad y portabilidad quedan cerradas, todavía deben formalizarse:
 
-Añadir navegación, cabecera contextual, persistencia continua, validez de 10 minutos y descarte accidental. Incluir idempotencia de inicio y cierre.
+- contrato exacto y versiones de `CurriculumPack` y `CurriculumProfile`;
+- política de equivalencias entre asignaturas provisionales y externas;
+- formato de licencia, autoría y actualización de paquetes compartidos;
+- duración mínima razonable y regla exacta de oportunidad real;
+- semántica de varias acciones contrarias para un mismo saber;
+- identidad, cierre, reapertura y corrección trazable de periodos;
+- comportamiento de una sesión activa al abrir Asistencia;
+- validez, recuperación, última actividad fiable, límite y deshacer de sesiones;
+- formato exacto de cada adaptador iDoceo y Additio tras pruebas con archivos reales;
+- política de identidad, privacidad, auditoría y retención en servidor;
+- resolución de conflictos entre dispositivos.
 
-### Fase 5. Participación y cumplimiento ordinario
-
-Intersectar presencia y sesión, validar acciones elegibles y generar resúmenes separados, sin tocar la economía.
-
-### Fase 6. Evidencias curriculares
-
-Conectar el catálogo cerrado, registrar instantáneas y ofrecer consultas actitudinales que no produzcan calificaciones.
-
-### Fase 7. Recuperación y deshacer
-
-Implementar última actividad fiable, recuperación tras cierre, límite de 90 minutos y reversión temporal auditada.
-
-### Fase 8. Horario y ambientación
-
-Añadir sugerencias no automáticas, excepciones y temas ligeros por asignatura. Mantener accesibilidad y significados visuales globales.
-
-### Fase 9. Persistencia de servidor
-
-Sustituir adaptadores locales por repositorios transaccionales, identidad docente real, sincronización y auditoría. La secuencia exacta puede adelantarse si el backend se convierte antes en requisito de despliegue.
-
-Cada fase debe cerrar con TypeScript, lint, build, comprobaciones deterministas propias y pruebas de migración sobre copias de datos heredados.
-
-## 17. Riesgos e incompatibilidades
-
-1. **Persistencia local fragmentada.** Alumnos, movimientos y acciones se guardan por separado; hoy una interrupción puede dejar efectos parciales. Las sesiones y evidencias requieren atomicidad real.
-2. **Doble modelo de alumno.** `app/types/student.ts` es operativo y `domain/student/Student.ts` es futuro. Debe definirse una transición, no añadir un tercer modelo.
-3. **Clase e identidad incompletas.** La cabecera está fija, `claseId` puede estar vacío y el docente es un marcador local. No son suficientes para registros educativos de servidor.
-4. **Eventos descriptivos, no persistidos.** `ApplyStudentAction` crea eventos, pero no existe bus ni almacén operativo que los confirme.
-5. **Sin transacción implementada.** El contrato existe, pero el puente actual muta dos almacenes locales diferentes.
-6. **Acciones tipadas por signo.** Añadir un campo de tipo sin una fuente canónica puede producir inconsistencias.
-7. **Movimientos heredados sin contexto.** No se debe inventar asignatura, sesión o criterio retroactivo.
-8. **Ausencia de definición de oportunidad real.** Sin esa regla, el cumplimiento ordinario puede producir conclusiones engañosas.
-9. **Tiempo y concurrencia.** Suspensión del navegador, cambio de reloj y varias pestañas pueden inflar o duplicar sesiones.
-10. **Privacidad y conservación.** Asistencia y observaciones educativas requieren política de acceso, auditoría, exportación, rectificación y retención antes de producción.
-11. **Pruebas no orquestadas.** Hay comprobaciones deterministas útiles, pero no un ejecutor único en los scripts del proyecto.
-
-## 18. Decisiones pendientes antes de producción
-
-- visibilidad exacta de acciones `general` dentro de asignaturas;
-- fuente canónica del tipo positivo/negativo;
-- regla de oportunidad real y presencia mínima;
-- comportamiento de una sesión al abrir Asistencia;
-- flujo de salidas y múltiples intervalos diarios;
-- definición de última actividad fiable y `pending-review`;
-- duración de la ventana de deshacer;
-- propiedad y zona horaria del horario;
-- catálogo curricular inicial y su gobierno;
-- backend, autenticación, roles, auditoría y retención;
-- política de sincronización y resolución de conflictos entre dispositivos.
-
-Estas decisiones no deben resolverse implícitamente dentro de componentes React ni mediante valores dispersos. Deben formalizarse como reglas de dominio o configuración versionada antes de habilitar cada fase.
+Estas decisiones no deben ocultarse en componentes React, valores dispersos ni migraciones automáticas de lectura. Deben convertirse en contratos, reglas puras y configuraciones versionadas antes de habilitar la fase correspondiente.
