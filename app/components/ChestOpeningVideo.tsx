@@ -8,6 +8,10 @@ import {
   useRef,
   useState,
 } from "react";
+import {
+  createChestOpeningLifecycle,
+  getChestAudioTailSafetyTimeoutMs,
+} from "../services/chestOpeningLifecycleService";
 
 const CHEST_OPENING_VIDEO_SRC = "/assets/chests/chest-opening.mp4";
 const CHEST_OPENING_AUDIO_SRC = "/assets/chests/cristalclass-chest-opening-audio.mp3";
@@ -17,7 +21,7 @@ const FLASH_IN_DURATION_MS = 300;
 const FLASH_PEAK_DURATION_MS = 120;
 const FLASH_OUT_DURATION_MS = 600;
 
-type Phase = "video" | "flash-in" | "flash-peak" | "flash-out";
+type Phase = "video" | "flash-in" | "flash-peak" | "flash-out" | "audio-tail";
 
 type Props = {
   isOpen: boolean;
@@ -47,11 +51,17 @@ const ChestOpeningVideo = forwardRef<ChestOpeningVideoHandle, Props>(function Ch
 ) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
-  const transitionStartedRef = useRef(false);
-  const revealNotifiedRef = useRef(false);
+  const lifecycleRef = useRef(createChestOpeningLifecycle(soundEnabled));
+  const audioSafetyTimerRef = useRef<number | null>(null);
   const [phase, setPhase] = useState<Phase>("video");
   const [showSkip, setShowSkip] = useState(false);
   const [audioPlaybackBlocked, setAudioPlaybackBlocked] = useState(false);
+
+  const clearAudioSafetyTimer = useCallback(() => {
+    if (audioSafetyTimerRef.current === null) return;
+    window.clearTimeout(audioSafetyTimerRef.current);
+    audioSafetyTimerRef.current = null;
+  }, []);
 
   const resetMedia = useCallback(() => {
     const video = videoRef.current;
@@ -66,7 +76,8 @@ const ChestOpeningVideo = forwardRef<ChestOpeningVideoHandle, Props>(function Ch
       audio.pause();
       audio.currentTime = 0;
     }
-  }, []);
+    clearAudioSafetyTimer();
+  }, [clearAudioSafetyTimer]);
 
   const pauseAudio = useCallback((mute?: boolean) => {
     const audio = audioRef.current;
@@ -90,12 +101,20 @@ const ChestOpeningVideo = forwardRef<ChestOpeningVideoHandle, Props>(function Ch
     }
   }, []);
 
+  const finishIfReady = useCallback(() => {
+    if (!lifecycleRef.current.finish()) return;
+    clearAudioSafetyTimer();
+    onFinished();
+  }, [clearAudioSafetyTimer, onFinished]);
+
   const reportAudioFailure = useCallback((error: unknown) => {
     const audio = audioRef.current;
-    if (!audio) return;
+    if (!audio || lifecycleRef.current.getSnapshot().cleaned) return;
 
     audio.pause();
     setAudioPlaybackBlocked(true);
+    lifecycleRef.current.stopWaitingForAudio();
+    finishIfReady();
 
     if (process.env.NODE_ENV === "development") {
       console.warn({
@@ -108,13 +127,14 @@ const ChestOpeningVideo = forwardRef<ChestOpeningVideoHandle, Props>(function Ch
         soundEnabled,
       });
     }
-  }, [soundEnabled]);
+  }, [finishIfReady, soundEnabled]);
 
   const playAudioFromCurrentGesture = useCallback((updateGlobalPreference: boolean) => {
     const video = videoRef.current;
     const audio = audioRef.current;
     if (!video || !audio) return;
 
+    lifecycleRef.current.expectAudio();
     synchronizeAudio(true);
     audio.defaultMuted = false;
     audio.muted = false;
@@ -144,29 +164,39 @@ const ChestOpeningVideo = forwardRef<ChestOpeningVideoHandle, Props>(function Ch
   }, [onSoundEnabledChange, reportAudioFailure, synchronizeAudio]);
 
   const startTransition = useCallback(() => {
-    if (transitionStartedRef.current) return;
+    if (!lifecycleRef.current.startVisualTransition()) return;
 
-    transitionStartedRef.current = true;
-    resetMedia();
+    videoRef.current?.pause();
     setPhase("flash-in");
-  }, [resetMedia]);
+
+    const audio = audioRef.current;
+    if (lifecycleRef.current.getSnapshot().audioExpected && audio) {
+      clearAudioSafetyTimer();
+      audioSafetyTimerRef.current = window.setTimeout(() => {
+        audio.pause();
+        lifecycleRef.current.stopWaitingForAudio();
+        finishIfReady();
+      }, getChestAudioTailSafetyTimeoutMs(audio.duration, audio.currentTime));
+    }
+  }, [clearAudioSafetyTimer, finishIfReady]);
 
   const startPlayback = useCallback(() => {
     const video = videoRef.current;
     const audio = audioRef.current;
     if (!video || !audio) {
+      lifecycleRef.current.reset(false);
       startTransition();
       return;
     }
 
-    transitionStartedRef.current = false;
-    revealNotifiedRef.current = false;
+    lifecycleRef.current.reset(soundEnabled);
     setPhase("video");
     setShowSkip(false);
     setAudioPlaybackBlocked(false);
     resetMedia();
 
     if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      lifecycleRef.current.stopWaitingForAudio();
       startTransition();
       return;
     }
@@ -182,6 +212,7 @@ const ChestOpeningVideo = forwardRef<ChestOpeningVideoHandle, Props>(function Ch
     try {
       videoPlayback = video.play();
     } catch {
+      lifecycleRef.current.stopWaitingForAudio();
       startTransition();
       return;
     }
@@ -194,8 +225,22 @@ const ChestOpeningVideo = forwardRef<ChestOpeningVideoHandle, Props>(function Ch
   const disableSound = useCallback(() => {
     pauseAudio(true);
     setAudioPlaybackBlocked(false);
+    lifecycleRef.current.stopWaitingForAudio();
+    finishIfReady();
     onSoundEnabledChange(false);
-  }, [onSoundEnabledChange, pauseAudio]);
+  }, [finishIfReady, onSoundEnabledChange, pauseAudio]);
+
+  const handleAudioEnded = useCallback(() => {
+    clearAudioSafetyTimer();
+    lifecycleRef.current.markAudioFinished();
+    finishIfReady();
+  }, [clearAudioSafetyTimer, finishIfReady]);
+
+  const skipAnimation = useCallback(() => {
+    pauseAudio();
+    lifecycleRef.current.stopWaitingForAudio();
+    startTransition();
+  }, [pauseAudio, startTransition]);
 
   useImperativeHandle(ref, () => ({ startPlayback }), [startPlayback]);
 
@@ -205,8 +250,7 @@ const ChestOpeningVideo = forwardRef<ChestOpeningVideoHandle, Props>(function Ch
     const peakTimer = window.setTimeout(() => {
       setPhase("flash-peak");
 
-      if (!revealNotifiedRef.current) {
-        revealNotifiedRef.current = true;
+      if (lifecycleRef.current.revealReward()) {
         onReveal();
       }
     }, FLASH_IN_DURATION_MS);
@@ -224,9 +268,13 @@ const ChestOpeningVideo = forwardRef<ChestOpeningVideoHandle, Props>(function Ch
   useEffect(() => {
     if (!isOpen || phase !== "flash-out") return;
 
-    const finishTimer = window.setTimeout(onFinished, FLASH_OUT_DURATION_MS);
+    const finishTimer = window.setTimeout(() => {
+      setPhase("audio-tail");
+      lifecycleRef.current.markVisualTransitionFinished();
+      finishIfReady();
+    }, FLASH_OUT_DURATION_MS);
     return () => window.clearTimeout(finishTimer);
-  }, [isOpen, onFinished, phase]);
+  }, [finishIfReady, isOpen, phase]);
 
   useEffect(() => {
     if (!isOpen || phase !== "video") return;
@@ -236,14 +284,20 @@ const ChestOpeningVideo = forwardRef<ChestOpeningVideoHandle, Props>(function Ch
   }, [isOpen, phase]);
 
   useEffect(() => {
-    if (!soundEnabled) pauseAudio(true);
-  }, [pauseAudio, soundEnabled]);
+    if (soundEnabled) return;
+    pauseAudio(true);
+    lifecycleRef.current.stopWaitingForAudio();
+    finishIfReady();
+  }, [finishIfReady, pauseAudio, soundEnabled]);
 
   useEffect(() => {
     if (!isOpen) resetMedia();
   }, [isOpen, resetMedia]);
 
-  useEffect(() => resetMedia, [resetMedia]);
+  useEffect(() => () => {
+    lifecycleRef.current.cleanup();
+    resetMedia();
+  }, [resetMedia]);
 
   const isFlashing = phase !== "video";
   const isSoundActive = soundEnabled && !audioPlaybackBlocked;
@@ -253,11 +307,11 @@ const ChestOpeningVideo = forwardRef<ChestOpeningVideoHandle, Props>(function Ch
       role={isOpen ? "dialog" : undefined}
       aria-modal={isOpen || undefined}
       aria-label={isOpen ? "Apertura del cofre" : undefined}
-      aria-busy={isOpen && (phase === "video" || phase === "flash-in")}
+      aria-busy={isOpen || undefined}
       onClick={(event) => event.stopPropagation()}
       className={`fixed inset-0 z-[90] h-screen w-screen overflow-hidden bg-[#020b1d] h-[100dvh] transition-opacity motion-reduce:transition-none ${
         isOpen ? "block" : "hidden"
-      } ${phase === "flash-out" ? "opacity-0 duration-[600ms]" : "opacity-100"}`}
+      } ${phase === "flash-out" || phase === "audio-tail" ? "opacity-0 duration-[600ms]" : "opacity-100"}`}
     >
       <video
         ref={videoRef}
@@ -274,7 +328,6 @@ const ChestOpeningVideo = forwardRef<ChestOpeningVideoHandle, Props>(function Ch
         onStalled={() => {
           if (isOpen) startTransition();
         }}
-        onPause={() => pauseAudio()}
         onSeeking={() => synchronizeAudio(true)}
         onTimeUpdate={() => synchronizeAudio(false)}
         onRateChange={() => synchronizeAudio(false)}
@@ -285,14 +338,25 @@ const ChestOpeningVideo = forwardRef<ChestOpeningVideoHandle, Props>(function Ch
         <source src={CHEST_OPENING_VIDEO_SRC} type="video/mp4" />
       </video>
 
-      <audio ref={audioRef} preload="auto" aria-hidden="true">
+      <audio
+        ref={audioRef}
+        preload="auto"
+        aria-hidden="true"
+        onEnded={handleAudioEnded}
+        onError={() => {
+          if (isOpen) reportAudioFailure({ name: "AudioMediaError" });
+        }}
+        onAbort={() => {
+          if (isOpen) reportAudioFailure({ name: "AudioAbortError" });
+        }}
+      >
         <source src={CHEST_OPENING_AUDIO_SRC} type="audio/mpeg" />
       </audio>
 
       <div
         aria-hidden="true"
         className={`absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(255,255,255,1)_0%,rgba(226,251,255,.98)_24%,rgba(74,226,255,.88)_54%,rgba(5,59,126,.92)_100%)] transition-opacity motion-reduce:transition-none ${
-          phase === "video" ? "opacity-0" : phase === "flash-out" ? "opacity-0 duration-[600ms]" : "opacity-100 duration-300"
+          phase === "video" || phase === "audio-tail" ? "opacity-0" : phase === "flash-out" ? "opacity-0 duration-[600ms]" : "opacity-100 duration-300"
         }`}
       />
 
@@ -312,7 +376,7 @@ const ChestOpeningVideo = forwardRef<ChestOpeningVideoHandle, Props>(function Ch
       {showSkip && phase === "video" && (
         <button
           type="button"
-          onClick={startTransition}
+          onClick={skipAnimation}
           aria-label="Omitir animación de apertura del cofre"
           className="absolute bottom-[max(1.5rem,env(safe-area-inset-bottom))] right-[max(1.5rem,env(safe-area-inset-right))] rounded-full border border-cyan-100/80 bg-slate-950/70 px-5 py-2.5 text-sm font-black text-white shadow-lg backdrop-blur-sm transition hover:bg-slate-900 focus-visible:outline-4 focus-visible:outline-cyan-200 focus-visible:outline-offset-2"
         >

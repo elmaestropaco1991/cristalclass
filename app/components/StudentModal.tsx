@@ -53,6 +53,7 @@ export default function StudentModal({ alumno, movements, soundEnabled, onSoundE
   const [coleccionAbierta, setColeccionAbierta] = useState(false);
   const [cofreAbierto, setCofreAbierto] = useState(false);
   const [chestOpeningVideoOpen, setChestOpeningVideoOpen] = useState(false);
+  const [chestRewardControlsEnabled, setChestRewardControlsEnabled] = useState(false);
   const [chestFlowActive, setChestFlowActive] = useState(false);
   const [lastCollectionCategory, setLastCollectionCategory] = useState<ItemCategory | null>(null);
   const [isApplyingAction, setIsApplyingAction] = useState(false);
@@ -100,6 +101,7 @@ export default function StudentModal({ alumno, movements, soundEnabled, onSoundE
     chestFlowGuardRef.current = true;
     flushSync(() => {
       setChestFlowActive(true);
+      setChestRewardControlsEnabled(false);
       setChestOpeningVideoOpen(true);
     });
     chestOpeningVideoRef.current.startPlayback();
@@ -107,6 +109,7 @@ export default function StudentModal({ alumno, movements, soundEnabled, onSoundE
 
   const closeChestScreen = () => {
     setCofreAbierto(false);
+    setChestRewardControlsEnabled(false);
     setChestFlowActive(false);
     chestFlowGuardRef.current = false;
   };
@@ -288,6 +291,7 @@ export default function StudentModal({ alumno, movements, soundEnabled, onSoundE
         {cofreAbierto && (
           <StudentChestScreen
             student={alumno}
+            controlsEnabled={chestRewardControlsEnabled}
             onStudentUpdated={onStudentUpdated}
             onClose={closeChestScreen}
           />
@@ -301,7 +305,10 @@ export default function StudentModal({ alumno, movements, soundEnabled, onSoundE
           soundEnabled={soundEnabled}
           onSoundEnabledChange={onSoundEnabledChange}
           onReveal={() => setCofreAbierto(true)}
-          onFinished={() => setChestOpeningVideoOpen(false)}
+          onFinished={() => {
+            setChestRewardControlsEnabled(true);
+            setChestOpeningVideoOpen(false);
+          }}
         />
       )}
     </div>
