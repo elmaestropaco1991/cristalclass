@@ -1,4 +1,5 @@
 import {
+  CURRICULUM_LEGACY_SCHEMA_VERSION,
   CURRICULUM_SCHEMA_VERSION,
   type CurriculumPack,
   type VersionedCurriculumData,
@@ -67,6 +68,7 @@ export interface CurriculumPackImportRequest {
 export interface CurriculumPackImportIdMap {
   readonly packId: string;
   readonly subjectIds: Readonly<Record<string, string>>;
+  readonly competenceIds: Readonly<Record<string, string>>;
   readonly criterionIds: Readonly<Record<string, string>>;
   readonly basicKnowledgeIds: Readonly<Record<string, string>>;
 }
@@ -92,6 +94,7 @@ export interface CurriculumPackImportPreviewOptions {
 
 export type CurriculumPackImportConflictCode =
   | "invalid-existing-state"
+  | "legacy-catalog-incomplete"
   | "invalid-operation-id"
   | "stale-revision"
   | "package-version-mismatch"
@@ -126,6 +129,7 @@ export interface CurriculumPackImportConflict {
 export type CurriculumPackImportWarningCode =
   | "apparent-content-duplicate"
   | "duplicate-subject-name"
+  | "duplicate-specific-competence-text"
   | "duplicate-criterion-text"
   | "duplicate-basic-knowledge-text"
   | "explicit-copy-of-conflict"
@@ -201,6 +205,7 @@ export interface CurriculumPackImportPreview {
     readonly packageVersion: string;
     readonly provenanceKind: CurriculumPack["provenance"]["kind"];
     readonly subjectCount: number;
+    readonly specificCompetenceCount: number;
     readonly criterionCount: number;
     readonly basicKnowledgeCount: number;
     readonly title: string;
@@ -208,6 +213,7 @@ export interface CurriculumPackImportPreview {
   };
   readonly counts: {
     readonly subjects: number;
+    readonly specificCompetences: number;
     readonly criteria: number;
     readonly basicKnowledge: number;
     readonly criterionReferences: number;
@@ -1046,6 +1052,7 @@ function createPreview(
       packageVersion: base.sourcePack.packageVersion,
       provenanceKind: base.sourcePack.provenance.kind,
       subjectCount: counts.subjects,
+      specificCompetenceCount: counts.specificCompetences,
       criterionCount: counts.criteria,
       basicKnowledgeCount: counts.basicKnowledge,
       title: "Previsualización de importación curricular",
@@ -1083,7 +1090,18 @@ function validateImportState(state: CurriculumPackImportState): CurriculumPackIm
     )];
   }
   const conflicts: CurriculumPackImportConflict[] = [];
-  state.packs.forEach((pack, packIndex) => {
+  state.packs.forEach((pack: CurriculumPack, packIndex: number) => {
+    const legacyIncomplete = pack.schemaVersion === CURRICULUM_LEGACY_SCHEMA_VERSION
+      || pack.subjects.some((subject) => subject.specificCompetences === undefined
+        || subject.criteria.some((criterion) => criterion.specificCompetenceId === undefined));
+    if (legacyIncomplete) {
+      conflicts.push(conflict(
+        "legacy-catalog-incomplete",
+        `packs[${packIndex}]`,
+        "The existing schema-v1 catalog has no complete specific-competence ownership; an explicit reviewed migration is required before import."
+      ));
+      return;
+    }
     const validation = validateCurriculumPackForJson(pack);
     mapPackValidationConflicts(validation).forEach((item) => conflicts.push({
       ...item,
@@ -1098,11 +1116,13 @@ function validateImportState(state: CurriculumPackImportState): CurriculumPackIm
   });
   if (conflicts.length === 0) {
     const shared = validateCurriculumData(createValidationAggregate(state.packs), []);
-    shared.issues.forEach((validationIssue) => conflicts.push(conflict(
-      "invalid-existing-state",
-      validationIssue.path,
-      validationIssue.message
-    )));
+    shared.issues
+      .filter((validationIssue) => validationIssue.severity === "error")
+      .forEach((validationIssue) => conflicts.push(conflict(
+        "invalid-existing-state",
+        validationIssue.path,
+        validationIssue.message
+      )));
   }
   const operationIds = new Set<string>();
   state.appliedOperations.forEach((operation, index) => {
@@ -1362,7 +1382,13 @@ function normalizeResolutionValue(value: unknown): NormalizedResolution {
         ),
       };
     }
-    const allowedIdMapKeys = ["packId", "subjectIds", "criterionIds", "basicKnowledgeIds"];
+    const allowedIdMapKeys = [
+      "packId",
+      "subjectIds",
+      "competenceIds",
+      "criterionIds",
+      "basicKnowledgeIds",
+    ];
     const unexpectedIdMapKey = Object.keys(idMapRecord).find(
       (key) => !allowedIdMapKeys.includes(key)
     );
@@ -1412,7 +1438,13 @@ function sanitizeResolutionIdMap(
   value: Readonly<Record<string, unknown>>
 ): Readonly<Record<string, unknown>> | null {
   const result: Record<string, unknown> = Object.create(null) as Record<string, unknown>;
-  for (const key of ["packId", "subjectIds", "criterionIds", "basicKnowledgeIds"] as const) {
+  for (const key of [
+    "packId",
+    "subjectIds",
+    "competenceIds",
+    "criterionIds",
+    "basicKnowledgeIds",
+  ] as const) {
     if (!Object.hasOwn(value, key)) continue;
     if (key === "packId") {
       result[key] = value[key];
@@ -1460,7 +1492,13 @@ function remapCurriculumPack(
     )] };
   }
   const conflicts: CurriculumPackImportConflict[] = [];
-  const allowedKeys = ["packId", "subjectIds", "criterionIds", "basicKnowledgeIds"];
+  const allowedKeys = [
+    "packId",
+    "subjectIds",
+    "competenceIds",
+    "criterionIds",
+    "basicKnowledgeIds",
+  ];
   Object.keys(idMap).forEach((key) => {
     if (!allowedKeys.includes(key) || DANGEROUS_KEYS.has(key)) {
       conflicts.push(conflict(
@@ -1471,6 +1509,11 @@ function remapCurriculumPack(
     }
   });
   const subjectIds = readIdRecord(idMap.subjectIds, "resolution.idMap.subjectIds", conflicts);
+  const competenceIds = readIdRecord(
+    idMap.competenceIds,
+    "resolution.idMap.competenceIds",
+    conflicts
+  );
   const criterionIds = readIdRecord(idMap.criterionIds, "resolution.idMap.criterionIds", conflicts);
   const basicKnowledgeIds = readIdRecord(
     idMap.basicKnowledgeIds,
@@ -1478,9 +1521,13 @@ function remapCurriculumPack(
     conflicts
   );
   const sourceSubjectIds = pack.subjects.map((subject) => subject.id);
+  const sourceCompetenceIds = pack.subjects.flatMap(
+    (subject) => subject.specificCompetences?.map((item) => item.id) ?? []
+  );
   const sourceCriterionIds = pack.subjects.flatMap((subject) => subject.criteria.map((item) => item.id));
   const sourceKnowledgeIds = pack.subjects.flatMap((subject) => subject.basicKnowledge.map((item) => item.id));
   validateMapCompleteness(subjectIds, sourceSubjectIds, "subjectIds", conflicts);
+  validateMapCompleteness(competenceIds, sourceCompetenceIds, "competenceIds", conflicts);
   validateMapCompleteness(criterionIds, sourceCriterionIds, "criterionIds", conflicts);
   validateMapCompleteness(basicKnowledgeIds, sourceKnowledgeIds, "basicKnowledgeIds", conflicts);
   if (!isStableString(idMap.packId, DEFAULT_CURRICULUM_PACK_JSON_LIMITS.maxIdentifierLength)) {
@@ -1493,12 +1540,18 @@ function remapCurriculumPack(
   const originalIds = new Set([
     pack.id,
     ...sourceSubjectIds,
+    ...sourceCompetenceIds,
     ...sourceCriterionIds,
     ...sourceKnowledgeIds,
   ]);
   const targetEntries: Array<readonly [string, string | undefined, string]> = [
     [pack.id, idMap.packId, "packId"],
     ...sourceSubjectIds.map((id) => [id, subjectIds?.[id], `subjectIds.${id}`] as const),
+    ...sourceCompetenceIds.map((id) => [
+      id,
+      competenceIds?.[id],
+      `competenceIds.${id}`,
+    ] as const),
     ...sourceCriterionIds.map((id) => [id, criterionIds?.[id], `criterionIds.${id}`] as const),
     ...sourceKnowledgeIds.map((id) => [id, basicKnowledgeIds?.[id], `basicKnowledgeIds.${id}`] as const),
   ];
@@ -1532,7 +1585,13 @@ function remapCurriculumPack(
     }
     sourceByTarget.set(targetId, sourceId);
   });
-  if (conflicts.length > 0 || !subjectIds || !criterionIds || !basicKnowledgeIds) {
+  if (
+    conflicts.length > 0
+    || !subjectIds
+    || !competenceIds
+    || !criterionIds
+    || !basicKnowledgeIds
+  ) {
     return { pack: null, conflicts: deduplicateConflicts(conflicts) };
   }
 
@@ -1542,9 +1601,22 @@ function remapCurriculumPack(
     subjects: pack.subjects.map((subject) => ({
       ...subject,
       id: subjectIds[subject.id],
+      ...(subject.specificCompetences !== undefined
+        ? {
+            specificCompetences: subject.specificCompetences.map((competence) => ({
+              ...competence,
+              id: competenceIds[competence.id],
+            })),
+          }
+        : {}),
       criteria: subject.criteria.map((criterion) => ({
         ...criterion,
         id: criterionIds[criterion.id],
+        ...(criterion.specificCompetenceId !== undefined
+          ? {
+              specificCompetenceId: competenceIds[criterion.specificCompetenceId],
+            }
+          : {}),
       })),
       basicKnowledge: subject.basicKnowledge.map((knowledge) => ({
         ...knowledge,
@@ -1661,6 +1733,12 @@ function collectDuplicateContentWarnings(
       `pack.subjects[${subjectIndex}].name`,
       `Subject name repeats ${previousSubject.id}; identities remain separate.`
     ));
+    collectRepeatedTextWarnings(
+      subject.specificCompetences ?? [],
+      "duplicate-specific-competence-text",
+      `pack.subjects[${subjectIndex}].specificCompetences`,
+      warnings
+    );
     collectRepeatedTextWarnings(subject.criteria, "duplicate-criterion-text", `pack.subjects[${subjectIndex}].criteria`, warnings);
     collectRepeatedTextWarnings(
       subject.basicKnowledge,
@@ -1671,6 +1749,14 @@ function collectDuplicateContentWarnings(
   });
   const existingTexts = collectExistingTexts(existing);
   incoming.subjects.forEach((subject, subjectIndex) => {
+    subject.specificCompetences?.forEach((competence, competenceIndex) => {
+      const match = existingTexts.specificCompetences.get(comparableText(competence.text));
+      if (match && match !== competence.id) warnings.push(warning(
+        "duplicate-specific-competence-text",
+        `pack.subjects[${subjectIndex}].specificCompetences[${competenceIndex}].text`,
+        `Specific-competence text resembles existing ${match}; no automatic merge was performed.`
+      ));
+    });
     subject.criteria.forEach((criterion, criterionIndex) => {
       const match = existingTexts.criteria.get(comparableText(criterion.text));
       if (match && match !== criterion.id) warnings.push(warning(
@@ -1693,7 +1779,10 @@ function collectDuplicateContentWarnings(
 
 function collectRepeatedTextWarnings(
   values: readonly { readonly id: string; readonly text: string }[],
-  code: "duplicate-criterion-text" | "duplicate-basic-knowledge-text",
+  code:
+    | "duplicate-specific-competence-text"
+    | "duplicate-criterion-text"
+    | "duplicate-basic-knowledge-text",
   path: string,
   warnings: CurriculumPackImportWarning[]
 ): void {
@@ -1715,6 +1804,11 @@ function collectDuplicateExternalCodeConflicts(
   const conflicts: CurriculumPackImportConflict[] = [];
   collectRepeatedCodes(pack.subjects, "pack.subjects", conflicts);
   pack.subjects.forEach((subject, subjectIndex) => {
+    collectRepeatedCodes(
+      subject.specificCompetences ?? [],
+      `pack.subjects[${subjectIndex}].specificCompetences`,
+      conflicts
+    );
     collectRepeatedCodes(subject.criteria, `pack.subjects[${subjectIndex}].criteria`, conflicts);
     collectRepeatedCodes(
       subject.basicKnowledge,
@@ -1814,13 +1908,24 @@ function fingerprintApparentContent(pack: CurriculumPack): string {
     stage: pack.stage,
     course: pack.course,
     subjects: pack.subjects.map((subject) => {
+      const competenceIndexById = new Map(
+        (subject.specificCompetences ?? []).map((competence, index) => [competence.id, index])
+      );
       const criterionIndexById = new Map(subject.criteria.map((criterion, index) => [criterion.id, index]));
       return {
         externalCode: subject.externalCode,
         legacySubjectId: subject.legacySubjectId,
         name: subject.name,
+        specificCompetences: subject.specificCompetences?.map((competence) => ({
+          externalCode: competence.externalCode,
+          sourceVersion: competence.sourceVersion,
+          text: competence.text,
+        })),
         criteria: subject.criteria.map((criterion) => ({
           externalCode: criterion.externalCode,
+          specificCompetenceIndex: criterion.specificCompetenceId === undefined
+            ? undefined
+            : competenceIndexById.get(criterion.specificCompetenceId),
           sourceVersion: criterion.sourceVersion,
           title: criterion.title,
           text: criterion.text,
@@ -1980,6 +2085,12 @@ function createCompactResolutionIdentity(
       subject.id,
       resolution.idMap.subjectIds[subject.id],
     ]),
+    ...sourcePack.subjects.flatMap((subject) => (
+      subject.specificCompetences?.map((competence) => [
+        competence.id,
+        resolution.idMap.competenceIds[competence.id],
+      ]) ?? []
+    )),
     ...sourcePack.subjects.flatMap((subject) => subject.criteria.map((criterion) => [
       criterion.id,
       resolution.idMap.criterionIds[criterion.id],
@@ -2063,14 +2174,19 @@ function storageBudgetConflict(
   );
 }
 
-function countPackEntities(pack: CurriculumPackJsonValidResult["pack"]): {
+function countPackEntities(pack: CurriculumPack): {
   readonly subjects: number;
+  readonly specificCompetences: number;
   readonly criteria: number;
   readonly basicKnowledge: number;
   readonly criterionReferences: number;
 } {
   return {
     subjects: pack.subjects.length,
+    specificCompetences: pack.subjects.reduce(
+      (total, subject) => total + (subject.specificCompetences?.length ?? 0),
+      0
+    ),
     criteria: pack.subjects.reduce((total, subject) => total + subject.criteria.length, 0),
     basicKnowledge: pack.subjects.reduce(
       (total, subject) => total + subject.basicKnowledge.length,
@@ -2095,6 +2211,10 @@ function collectPackIdEntries(pack: CurriculumPack): Array<{ readonly id: string
     { id: pack.id, path: "pack.id" },
     ...pack.subjects.flatMap((subject, subjectIndex) => [
       { id: subject.id, path: `pack.subjects[${subjectIndex}].id` },
+      ...(subject.specificCompetences?.map((competence, competenceIndex) => ({
+        id: competence.id,
+        path: `pack.subjects[${subjectIndex}].specificCompetences[${competenceIndex}].id`,
+      })) ?? []),
       ...subject.criteria.map((criterion, criterionIndex) => ({
         id: criterion.id,
         path: `pack.subjects[${subjectIndex}].criteria[${criterionIndex}].id`,
@@ -2108,18 +2228,23 @@ function collectPackIdEntries(pack: CurriculumPack): Array<{ readonly id: string
 }
 
 function collectExistingTexts(packs: readonly CurriculumPack[]): {
+  readonly specificCompetences: Map<string, string>;
   readonly criteria: Map<string, string>;
   readonly basicKnowledge: Map<string, string>;
 } {
+  const specificCompetences = new Map<string, string>();
   const criteria = new Map<string, string>();
   const basicKnowledge = new Map<string, string>();
   packs.forEach((pack) => pack.subjects.forEach((subject) => {
+    subject.specificCompetences?.forEach((competence) => {
+      specificCompetences.set(comparableText(competence.text), competence.id);
+    });
     subject.criteria.forEach((criterion) => criteria.set(comparableText(criterion.text), criterion.id));
     subject.basicKnowledge.forEach((knowledge) => {
       basicKnowledge.set(comparableText(knowledge.text), knowledge.id);
     });
   }));
-  return { criteria, basicKnowledge };
+  return { specificCompetences, criteria, basicKnowledge };
 }
 
 function createValidationAggregate(packs: readonly CurriculumPack[]): VersionedCurriculumData {

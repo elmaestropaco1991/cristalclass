@@ -174,7 +174,30 @@ Representa una asignatura dentro de un perfil o paquete:
 
 Dos paquetes pueden describir asignaturas semejantes sin compartir necesariamente el mismo identificador externo. Las equivalencias deben resolverse mediante una migración o una decisión explícita, no por comparar solo el nombre.
 
-### 4.3 `Criterion`
+### 4.3 `SpecificCompetence`
+
+Una competencia específica pertenece a una única asignatura curricular y conserva:
+
+- identificador interno estable;
+- código externo opcional;
+- texto oficial;
+- versión de procedencia del último cambio de código o texto;
+- posición pedagógica mediante el orden de la colección de la asignatura.
+
+El orden no se deduce del código ni del texto y reordenar no cambia `sourceVersion`. Los
+catálogos completos siguen la jerarquía `Asignatura → Competencia específica → Criterios`.
+Un criterio pertenece exactamente a una competencia de su propia asignatura. La ausencia
+de competencias o de esa relación solo representa un catálogo heredado incompleto:
+requiere revisión y migración explícitas, nunca inferencia automática, y no está preparado
+para activación.
+
+El núcleo curricular completo usa `schemaVersion: 2`. El envelope nativo JSON también
+evoluciona de forma independiente a versión 2. Un envelope JSON v1 se puede comprobar y
+reconocer como `legacy-incomplete`, conservando su checksum v1, pero no se convierte ni se
+importa automáticamente. La exportación nueva siempre incluye la colección ordenada de
+competencias y la referencia única de cada criterio.
+
+### 4.4 `Criterion`
 
 Un criterio contiene:
 
@@ -183,12 +206,13 @@ Un criterio contiene:
 - código externo opcional;
 - título;
 - texto;
+- identificador de su única competencia específica;
 - versión o procedencia;
 - estado activo o retirado sin pérdida histórica.
 
 El identificador interno es la referencia persistente. El código oficial o externo puede cambiar, faltar o repetirse entre paquetes y por ello no puede ser la única clave.
 
-### 4.4 `BasicKnowledge` o `Saber`
+### 4.5 `BasicKnowledge` o `Saber`
 
 Un saber contiene:
 
@@ -202,7 +226,7 @@ Un saber contiene:
 
 El modelo admite varios criterios por saber desde el inicio aunque la interfaz pueda ofrecer una edición progresiva.
 
-### 4.5 `ActionCurricularLink`
+### 4.6 `ActionCurricularLink`
 
 La relación curricular se almacena separada de `Action` y contiene conceptualmente:
 
@@ -218,7 +242,7 @@ La relación curricular se almacena separada de `Action` y contiene conceptualme
 
 Una acción global puede tener relaciones distintas según asignatura y perfil activo. La acción conserva nombre, icono, puntos, archivo y posición rápida; no posee ni duplica los textos oficiales.
 
-### 4.6 `EvidenceEffect` y `RecordingMode`
+### 4.7 `EvidenceEffect` y `RecordingMode`
 
 `EvidenceEffect` expresa cómo contribuye una observación actitudinal:
 
@@ -232,15 +256,19 @@ Una acción global puede tener relaciones distintas según asignatura y perfil a
 
 La configuración ordinaria debe identificar la regla, las acciones contrarias relevantes y las condiciones de oportunidad. No se deduce automáticamente de que una acción tenga puntos negativos. Debe habilitarse expresamente por el docente.
 
-### 4.7 Flujo curricular
+### 4.8 Flujo curricular
 
 El flujo definitivo es:
 
-> Acción → Saber → uno o varios criterios
+> Acción → Saber → uno o varios criterios → competencia específica de cada criterio
 
-Una acción no demuestra por sí sola el dominio de un saber o criterio. Una evidencia conserva referencias estables, versión y una instantánea mínima suficiente para interpretar el historial aunque el catálogo evolucione.
+La jerarquía normativa se lee en sentido inverso desde la asignatura:
+`Competencia específica → criterios`, con los saberes relacionados con uno o varios de
+ellos. Una acción no demuestra por sí sola el dominio de un saber, criterio o competencia,
+ni genera una nota por competencia. Una evidencia conserva referencias estables, versión y
+una instantánea mínima suficiente para interpretar el historial aunque el catálogo evolucione.
 
-### 4.8 Evidencia curricular y snapshot histórico
+### 4.9 Evidencia curricular y snapshot histórico
 
 Cada evidencia futura será un acontecimiento independiente, no una modificación retrospectiva de la acción ni del movimiento económico. Debe conservar, como mínimo:
 

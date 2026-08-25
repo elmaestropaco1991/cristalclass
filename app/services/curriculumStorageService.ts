@@ -1,4 +1,5 @@
 import {
+  CURRICULUM_LEGACY_SCHEMA_VERSION,
   CURRICULUM_SCHEMA_VERSION,
   type CurriculumStorageBackup,
   type CurriculumStorageEnvelope,
@@ -19,6 +20,8 @@ export {
 
 export const CURRICULUM_STORAGE_SCHEMA_VERSION = 1 as const;
 const CURRICULUM_STORAGE_PREFIX = "cristalclass_curriculum_v1";
+export const CURRICULUM_CONTENT_CHECKSUM_PREFIX = "curriculum-content-v2:" as const;
+export const CURRICULUM_LEGACY_CONTENT_CHECKSUM_PREFIX = "curriculum-content-v1:" as const;
 
 export interface CurriculumStorageAdapter {
   getItem(key: string): string | null;
@@ -36,6 +39,7 @@ export interface CurriculumStorageKeys {
 export type CurriculumStoredValueErrorStatus =
   | "corrupt"
   | "incompatible-version"
+  | "legacy-review-required"
   | "classroom-conflict";
 
 type CurriculumStoredValueError<Source extends "current" | "transaction" | "backup"> = {
@@ -103,7 +107,19 @@ export function getCurriculumBackupStorageKey(
 
 export function calculateCurriculumContentChecksum(data: VersionedCurriculumData): string {
   const canonical = canonicalizeCurriculumDataForChecksum(data);
-  return `curriculum-content-v1:${deterministicFingerprint(stripInformativeDates(canonical))}`;
+  return `${CURRICULUM_CONTENT_CHECKSUM_PREFIX}${deterministicFingerprint(
+    stripInformativeDates(canonical)
+  )}`;
+}
+
+/** Exact schema-v1 checksum retained solely to verify historical stored values. */
+export function calculateLegacyCurriculumContentChecksum(
+  data: VersionedCurriculumData
+): string {
+  const canonical = canonicalizeLegacyCurriculumDataForChecksum(data);
+  return `${CURRICULUM_LEGACY_CONTENT_CHECKSUM_PREFIX}${deterministicFingerprint(
+    stripInformativeDates(canonical)
+  )}`;
 }
 
 export function createCurriculumTransactionId(
@@ -284,7 +300,8 @@ function validateEnvelopeValue<Source extends "current" | "transaction" | "backu
   }
 
   const data = value.curriculumData as unknown as VersionedCurriculumData;
-  if (data.schemaVersion !== CURRICULUM_SCHEMA_VERSION) {
+  const isLegacyAggregate = data.schemaVersion === CURRICULUM_LEGACY_SCHEMA_VERSION;
+  if (!isLegacyAggregate && data.schemaVersion !== CURRICULUM_SCHEMA_VERSION) {
     return incompatible(source, data.schemaVersion);
   }
   if (
@@ -297,20 +314,28 @@ function validateEnvelopeValue<Source extends "current" | "transaction" | "backu
     return corrupt(source, "The curriculum data shape or classroom is invalid.");
   }
 
-  let validation;
-  try {
-    validation = validateCurriculumData(data, knownActionIds);
-  } catch {
-    return corrupt(source, "The curriculum data cannot be validated safely.");
+  if (isLegacyAggregate && containsSchemaV2CurriculumFields(data)) {
+    return corrupt(source, "Stored schema-v1 curriculum contains schema-v2-only fields.");
   }
-  if (!validation.valid) {
+
+  const validation = validateCurriculumData(data, knownActionIds);
+  const validationErrors = validation.issues.filter((item) => item.severity === "error");
+  const onlyLegacyReviewErrors = validationErrors.length > 0
+    && validationErrors.every((item) => LEGACY_REVIEW_ISSUE_CODES.has(item.code));
+  if (!validation.valid && !onlyLegacyReviewErrors) {
     return corrupt(
       source,
-      `The curriculum data violates its contract: ${validation.issues.map((issue) => issue.code).join(", ")}.`
+      `The curriculum data violates its contract: ${validationErrors.map((issue) => issue.code).join(", ")}.`
     );
   }
-  if (calculateCurriculumContentChecksum(data) !== value.contentChecksum) {
+  const expectedChecksum = isLegacyAggregate
+    ? calculateLegacyCurriculumContentChecksum(data)
+    : calculateCurriculumContentChecksum(data);
+  if (expectedChecksum !== value.contentChecksum) {
     return corrupt(source, "The curriculum checksum does not match its content.");
+  }
+  if (isLegacyAggregate || onlyLegacyReviewErrors) {
+    return legacyReviewRequired(source, CURRICULUM_LEGACY_SCHEMA_VERSION);
   }
 
   return { status: "valid", envelope: value as unknown as CurriculumStorageEnvelope };
@@ -469,6 +494,18 @@ function incompatible<Source extends "current" | "transaction" | "backup">(
   };
 }
 
+function legacyReviewRequired<Source extends "current" | "transaction" | "backup">(
+  source: Source,
+  foundSchemaVersion: number
+): CurriculumStoredValueError<Source> {
+  return {
+    status: "legacy-review-required",
+    source,
+    message: "Stored schema-v1 curriculum is recognized but requires explicit competence migration; it was not changed or written.",
+    foundSchemaVersion,
+  };
+}
+
 function classroomConflict<Source extends "current" | "transaction" | "backup">(
   source: Source,
   found: unknown
@@ -506,6 +543,49 @@ function canonicalizeCurriculumDataForChecksum(
           ...subject,
           basicKnowledge: subject.basicKnowledge.map((knowledge) => ({
             ...knowledge,
+            // Relation order is retained as supplied by the curriculum catalog.
+            criterionIds: [...knowledge.criterionIds],
+          })),
+        })),
+      }))
+      .sort(compareEntitiesById),
+    profiles: [...data.profiles]
+      .map((profile) => ({
+        ...profile,
+        ordinaryTracking: {
+          ...profile.ordinaryTracking,
+          rules: [...profile.ordinaryTracking.rules]
+            .map((rule) => ({
+              ...rule,
+              contraryActionIds: [...rule.contraryActionIds].sort(compareStableText),
+            }))
+            .sort(compareEntitiesById),
+        },
+      }))
+      .sort(compareEntitiesById),
+    actionLinks: [...data.actionLinks]
+      .map((link) => ({
+        ...link,
+        resolvedCriterionIds: [...link.resolvedCriterionIds].sort(compareStableText),
+      }))
+      .sort(compareEntitiesById),
+  };
+}
+
+/** Historical schema-v1 canonicalization; criterionIds were order-insensitive. */
+function canonicalizeLegacyCurriculumDataForChecksum(
+  data: VersionedCurriculumData
+): VersionedCurriculumData {
+  return {
+    ...data,
+    packs: [...data.packs]
+      .map((pack) => ({
+        ...pack,
+        subjects: pack.subjects.map((subject) => ({
+          ...subject,
+          criteria: subject.criteria.map((criterion) => ({ ...criterion })),
+          basicKnowledge: subject.basicKnowledge.map((knowledge) => ({
+            ...knowledge,
             criterionIds: [...knowledge.criterionIds].sort(compareStableText),
           })),
         })),
@@ -532,6 +612,19 @@ function canonicalizeCurriculumDataForChecksum(
       }))
       .sort(compareEntitiesById),
   };
+}
+
+const LEGACY_REVIEW_ISSUE_CODES = new Set([
+  "legacy-catalog-incomplete",
+  "missing-specific-competence-collection",
+  "unassigned-specific-competence",
+]);
+
+function containsSchemaV2CurriculumFields(data: VersionedCurriculumData): boolean {
+  return data.packs.some((pack) => pack.subjects.some((subject) =>
+    Object.hasOwn(subject, "specificCompetences")
+    || subject.criteria.some((criterion) => Object.hasOwn(criterion, "specificCompetenceId"))
+  ));
 }
 
 function compareEntitiesById(

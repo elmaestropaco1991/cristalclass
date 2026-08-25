@@ -15,6 +15,7 @@ import {
   type CurriculumCatalogWarning,
   type CurriculumPack,
   type CurriculumSubject,
+  type SpecificCompetence,
   type VersionedCurriculumData,
 } from "../types/curriculum";
 import { validateCurriculumData } from "./curriculumValidationService";
@@ -243,9 +244,116 @@ function proposeCatalogChange(
       const updated = finalizePack({ ...pack, subjects: ordered }, nextVersion, occurredAt);
       return changedProposal(pack, updated, "reorder", "pack", pack.id);
     }
+    case "add-specific-competence": {
+      const subject = findSubject(pack, command.subjectId);
+      if (!subject) return entityMissing(pack, "subjectId", command.subjectId);
+      const specificCompetence = createSpecificCompetence(
+        command.specificCompetence,
+        nextVersion
+      );
+      if (!specificCompetence) return blockedProposal(pack, conflict(
+        command.specificCompetence.id.trim() ? "invalid-text" : "duplicate-id",
+        "specificCompetence",
+        "A specific competence requires a stable identifier and non-empty text."
+      ));
+      if (findEntity(pack, specificCompetence.id)) {
+        return blockedProposal(pack, conflict(
+          "duplicate-id",
+          "specificCompetence.id",
+          "The identifier is already in use."
+        ));
+      }
+      const duplicateCode = findDuplicateExternalCode(
+        subject.specificCompetences ?? [],
+        specificCompetence.externalCode
+      );
+      if (duplicateCode) {
+        return duplicateExternalCode(pack, "specificCompetence.externalCode", duplicateCode.id);
+      }
+      const nextSubject = {
+        ...subject,
+        specificCompetences: [...(subject.specificCompetences ?? []), specificCompetence],
+      };
+      const updated = finalizePack(replaceSubject(pack, nextSubject), nextVersion, occurredAt);
+      return changedProposal(
+        pack,
+        updated,
+        "create",
+        "specific-competence",
+        specificCompetence.id
+      );
+    }
+    case "update-specific-competence": {
+      const subject = findSubject(pack, command.subjectId);
+      if (!subject) return entityMissing(pack, "subjectId", command.subjectId);
+      const specificCompetence = subject.specificCompetences?.find(
+        (candidate) => candidate.id === command.specificCompetenceId
+      );
+      if (!specificCompetence) {
+        return entityMissing(pack, "specificCompetenceId", command.specificCompetenceId);
+      }
+      const text = command.text.trim();
+      if (!text) {
+        return blockedProposal(pack, conflict(
+          "invalid-text",
+          "text",
+          "Specific competence text is required."
+        ));
+      }
+      const nextSpecificCompetence = updateSpecificCompetenceMetadata(
+        specificCompetence,
+        text,
+        command.externalCode,
+        nextVersion
+      );
+      const duplicateCode = findDuplicateExternalCode(
+        (subject.specificCompetences ?? []).filter(
+          (candidate) => candidate.id !== specificCompetence.id
+        ),
+        nextSpecificCompetence.externalCode
+      );
+      if (duplicateCode) return duplicateExternalCode(pack, "externalCode", duplicateCode.id);
+      const nextSubject = {
+        ...subject,
+        specificCompetences: (subject.specificCompetences ?? []).map((candidate) =>
+          candidate.id === specificCompetence.id ? nextSpecificCompetence : candidate
+        ),
+      };
+      const updated = finalizePack(replaceSubject(pack, nextSubject), nextVersion, occurredAt);
+      return changedProposal(
+        pack,
+        updated,
+        "update",
+        "specific-competence",
+        specificCompetence.id
+      );
+    }
+    case "reorder-specific-competences": {
+      const subject = findSubject(pack, command.subjectId);
+      if (!subject) return entityMissing(pack, "subjectId", command.subjectId);
+      const ordered = reorderExactly(
+        subject.specificCompetences ?? [],
+        command.specificCompetenceIds
+      );
+      if (!ordered) return invalidOrder(pack, "specificCompetenceIds");
+      const updated = finalizePack(
+        replaceSubject(pack, { ...subject, specificCompetences: ordered }),
+        nextVersion,
+        occurredAt
+      );
+      return changedProposal(pack, updated, "reorder", "subject", subject.id);
+    }
     case "add-criterion": {
       const subject = findSubject(pack, command.subjectId);
       if (!subject) return entityMissing(pack, "subjectId", command.subjectId);
+      const competenceConflicts = validateSpecificCompetenceReference(
+        pack,
+        subject,
+        command.criterion.specificCompetenceId
+      );
+      if (competenceConflicts.length > 0) {
+        return blockedProposal(pack, ...competenceConflicts);
+      }
       const criterion = createCriterion(command.criterion, nextVersion);
       if (!criterion) return blockedProposal(pack, conflict(
         command.criterion.id.trim() ? "invalid-text" : "duplicate-id",
@@ -268,10 +376,21 @@ function proposeCatalogChange(
       if (!criterion) return entityMissing(pack, "criterionId", command.criterionId);
       const text = command.text.trim();
       if (!text) return blockedProposal(pack, conflict("invalid-text", "text", "Criterion text is required."));
+      const specificCompetenceId = command.specificCompetenceId
+        ?? criterion.specificCompetenceId;
+      const competenceConflicts = validateSpecificCompetenceReference(
+        pack,
+        subject,
+        specificCompetenceId
+      );
+      if (competenceConflicts.length > 0) {
+        return blockedProposal(pack, ...competenceConflicts);
+      }
       const nextCriterion = updateCriterionMetadata(
         criterion,
         text,
         command.externalCode,
+        specificCompetenceId!,
         command.title,
         nextVersion
       );
@@ -280,6 +399,33 @@ function proposeCatalogChange(
         nextCriterion.externalCode
       );
       if (duplicateCode) return duplicateExternalCode(pack, "externalCode", duplicateCode.id);
+      const nextSubject = {
+        ...subject,
+        criteria: subject.criteria.map((candidate) =>
+          candidate.id === criterion.id ? nextCriterion : candidate
+        ),
+      };
+      const updated = finalizePack(replaceSubject(pack, nextSubject), nextVersion, occurredAt);
+      return changedProposal(pack, updated, "update", "criterion", criterion.id);
+    }
+    case "set-criterion-specific-competence": {
+      const subject = findSubject(pack, command.subjectId);
+      if (!subject) return entityMissing(pack, "subjectId", command.subjectId);
+      const criterion = subject.criteria.find((candidate) => candidate.id === command.criterionId);
+      if (!criterion) return entityMissing(pack, "criterionId", command.criterionId);
+      const competenceConflicts = validateSpecificCompetenceReference(
+        pack,
+        subject,
+        command.specificCompetenceId
+      );
+      if (competenceConflicts.length > 0) {
+        return blockedProposal(pack, ...competenceConflicts);
+      }
+      const nextCriterion: Criterion = {
+        ...criterion,
+        specificCompetenceId: command.specificCompetenceId,
+        sourceVersion: formatManualPackageVersion(nextVersion),
+      };
       const nextSubject = {
         ...subject,
         criteria: subject.criteria.map((candidate) =>
@@ -393,6 +539,27 @@ function proposeCatalogChange(
       if (!subject) return entityMissing(pack, "subjectId", command.subjectId);
       const dependencies = collectSubjectDependencies(pack, subject, context);
       return removalProposal(pack, "subject", subject.id, dependencies, context);
+    }
+    case "request-remove-specific-competence": {
+      const subject = findSubject(pack, command.subjectId);
+      if (!subject) return entityMissing(pack, "subjectId", command.subjectId);
+      const specificCompetence = subject.specificCompetences?.find(
+        (candidate) => candidate.id === command.specificCompetenceId
+      );
+      if (!specificCompetence) {
+        return entityMissing(pack, "specificCompetenceId", command.specificCompetenceId);
+      }
+      const dependencies = collectSpecificCompetenceDependencies(
+        subject,
+        specificCompetence
+      );
+      return removalProposal(
+        pack,
+        "specific-competence",
+        specificCompetence.id,
+        dependencies,
+        context
+      );
     }
     case "request-remove-criterion": {
       const subject = findSubject(pack, command.subjectId);
@@ -527,8 +694,38 @@ function validateManualPack(pack: CurriculumPack): CurriculumCatalogConflict[] {
   pack.subjects.forEach((subject, subjectIndex) => {
     if (!subject.id.trim()) conflicts.push(conflict("duplicate-id", `subjects[${subjectIndex}].id`, "Subject ID is required."));
     if (!subject.name.trim()) conflicts.push(conflict("invalid-name", `subjects[${subjectIndex}].name`, "Subject name is required."));
+    if (!Array.isArray(subject.specificCompetences)) {
+      conflicts.push(conflict(
+        "missing-specific-competence",
+        `subjects[${subjectIndex}].specificCompetences`,
+        "A schema-v2 manual subject must expose its ordered specific competences explicitly."
+      ));
+    }
+    conflicts.push(...duplicateExternalCodeConflicts(
+      subject.specificCompetences ?? [],
+      `subjects[${subjectIndex}].specificCompetences`
+    ));
     conflicts.push(...duplicateExternalCodeConflicts(subject.criteria, `subjects[${subjectIndex}].criteria`));
     conflicts.push(...duplicateExternalCodeConflicts(subject.basicKnowledge, `subjects[${subjectIndex}].basicKnowledge`));
+    (subject.specificCompetences ?? []).forEach((specificCompetence, competenceIndex) => {
+      if (!specificCompetence.text.trim()) {
+        conflicts.push(conflict(
+          "invalid-text",
+          `subjects[${subjectIndex}].specificCompetences[${competenceIndex}].text`,
+          "Specific competence text is required."
+        ));
+      }
+      if (!isValidManualEntitySourceVersion(
+        specificCompetence.sourceVersion,
+        packageRevision
+      )) {
+        conflicts.push(conflict(
+          "invalid-result",
+          `subjects[${subjectIndex}].specificCompetences[${competenceIndex}].sourceVersion`,
+          "Manual specific competence source version must identify an existing revision of this pack."
+        ));
+      }
+    });
     subject.criteria.forEach((criterion, criterionIndex) => {
       if (!criterion.text.trim()) conflicts.push(conflict("invalid-text", `subjects[${subjectIndex}].criteria[${criterionIndex}].text`, "Criterion text is required."));
       if (!isValidManualEntitySourceVersion(criterion.sourceVersion, packageRevision)) {
@@ -538,6 +735,14 @@ function validateManualPack(pack: CurriculumPack): CurriculumCatalogConflict[] {
           "Manual criterion source version must identify an existing revision of this pack."
         ));
       }
+      conflicts.push(...validateSpecificCompetenceReference(
+        pack,
+        subject,
+        criterion.specificCompetenceId
+      ).map((item) => ({
+        ...item,
+        path: `subjects[${subjectIndex}].criteria[${criterionIndex}].${item.path}`,
+      })));
     });
     subject.basicKnowledge.forEach((knowledge, knowledgeIndex) => {
       if (!knowledge.text.trim()) conflicts.push(conflict("invalid-text", `subjects[${subjectIndex}].basicKnowledge[${knowledgeIndex}].text`, "Basic knowledge text is required."));
@@ -568,12 +773,48 @@ function validateManualPack(pack: CurriculumPack): CurriculumCatalogConflict[] {
     actionLinks: [],
   };
   const validation = validateCurriculumData(validationData, []);
-  validation.issues.forEach((item) => conflicts.push(conflict(
-    "invalid-result",
-    item.path,
-    item.message
-  )));
+  validation.issues
+    .filter((item) => item.severity === "error")
+    .forEach((item) => conflicts.push(conflict(
+      "invalid-result",
+      item.path,
+      item.message
+    )));
   return deduplicateConflicts(conflicts);
+}
+
+function validateSpecificCompetenceReference(
+  pack: CurriculumPack,
+  subject: CurriculumSubject,
+  specificCompetenceId: string | undefined
+): CurriculumCatalogConflict[] {
+  if (!specificCompetenceId?.trim()) {
+    return [conflict(
+      "missing-specific-competence",
+      "specificCompetenceId",
+      "A schema-v2 criterion must reference one explicit specific competence."
+    )];
+  }
+  if (subject.specificCompetences?.some(
+    (specificCompetence) => specificCompetence.id === specificCompetenceId
+  )) {
+    return [];
+  }
+  const otherSubject = pack.subjects.find((candidate) =>
+    candidate.id !== subject.id
+    && candidate.specificCompetences?.some(
+      (specificCompetence) => specificCompetence.id === specificCompetenceId
+    )
+  );
+  return [conflict(
+    otherSubject
+      ? "specific-competence-from-another-subject"
+      : "missing-specific-competence",
+    "specificCompetenceId",
+    otherSubject
+      ? `Specific competence ${specificCompetenceId} belongs to subject ${otherSubject.id}.`
+      : `Specific competence ${specificCompetenceId} does not exist.`
+  )];
 }
 
 function validateCriterionReferences(
@@ -628,6 +869,12 @@ function collectReviewWarnings(pack: CurriculumPack): CurriculumCatalogWarning[]
       }
     });
     collectDuplicateTextWarnings(
+      subject.specificCompetences ?? [],
+      "duplicate-specific-competence-text",
+      `subjects[${subjectIndex}].specificCompetences`,
+      warnings
+    );
+    collectDuplicateTextWarnings(
       subject.criteria,
       "duplicate-criterion-text",
       `subjects[${subjectIndex}].criteria`,
@@ -645,7 +892,10 @@ function collectReviewWarnings(pack: CurriculumPack): CurriculumCatalogWarning[]
 
 function collectDuplicateTextWarnings(
   values: readonly { readonly id: string; readonly text: string }[],
-  code: "duplicate-criterion-text" | "duplicate-basic-knowledge-text",
+  code:
+    | "duplicate-specific-competence-text"
+    | "duplicate-criterion-text"
+    | "duplicate-basic-knowledge-text",
   path: string,
   warnings: CurriculumCatalogWarning[]
 ): void {
@@ -667,6 +917,15 @@ function collectSubjectDependencies(
   context: CurriculumCatalogDependencyContext
 ): CurriculumCatalogDependency[] {
   const dependencies: CurriculumCatalogDependency[] = [];
+  (subject.specificCompetences ?? []).forEach((specificCompetence, index) =>
+    dependencies.push(dependency(
+      "contained-specific-competence",
+      specificCompetence.id,
+      subject.id,
+      `subjects.${subject.id}.specificCompetences[${index}]`,
+      "The subject contains this specific competence."
+    ))
+  );
   subject.criteria.forEach((criterion, index) => dependencies.push(dependency(
     "contained-criterion",
     criterion.id,
@@ -711,6 +970,21 @@ function collectSubjectDependencies(
     ));
   });
   return deduplicateDependencies(dependencies);
+}
+
+function collectSpecificCompetenceDependencies(
+  subject: CurriculumSubject,
+  specificCompetence: SpecificCompetence
+): CurriculumCatalogDependency[] {
+  return deduplicateDependencies(subject.criteria
+    .filter((criterion) => criterion.specificCompetenceId === specificCompetence.id)
+    .map((criterion) => dependency(
+      "specific-competence-criterion",
+      criterion.id,
+      specificCompetence.id,
+      `subjects.${subject.id}.criteria.${criterion.id}.specificCompetenceId`,
+      "A criterion belongs to this specific competence."
+    )));
 }
 
 function collectCriterionDependencies(
@@ -777,7 +1051,7 @@ function collectBasicKnowledgeDependencies(
 
 function removalProposal(
   pack: CurriculumPack,
-  entityType: "subject" | "criterion" | "basic-knowledge",
+  entityType: "subject" | "specific-competence" | "criterion" | "basic-knowledge",
   entityId: string,
   dependencies: readonly CurriculumCatalogDependency[],
   context: CurriculumCatalogDependencyContext
@@ -839,7 +1113,7 @@ function changedProposal(
   beforePack: CurriculumPack | null,
   afterPack: CurriculumPack,
   kind: "create" | "update" | "reorder",
-  entityType: "pack" | "subject" | "criterion" | "basic-knowledge",
+  entityType: "pack" | "subject" | "specific-competence" | "criterion" | "basic-knowledge",
   entityId: string
 ): Proposal {
   const before = beforePack ? findEntity(beforePack, entityId)?.value ?? beforePack : null;
@@ -893,14 +1167,40 @@ function createSubject(input: { readonly id: string; readonly name: string; read
   return {
     id,
     name,
+    specificCompetences: [],
     criteria: [],
     basicKnowledge: [],
     ...optionalValue("externalCode", input.externalCode),
   };
 }
 
+function createSpecificCompetence(
+  input: {
+    readonly id: string;
+    readonly externalCode?: string;
+    readonly text: string;
+  },
+  version: number
+): SpecificCompetence | null {
+  const id = input.id.trim();
+  const text = input.text.trim();
+  if (!id || !text) return null;
+  return {
+    id,
+    text,
+    sourceVersion: formatManualPackageVersion(version),
+    ...optionalValue("externalCode", input.externalCode),
+  };
+}
+
 function createCriterion(
-  input: { readonly id: string; readonly externalCode?: string; readonly title?: string; readonly text: string },
+  input: {
+    readonly id: string;
+    readonly externalCode?: string;
+    readonly specificCompetenceId: string;
+    readonly title?: string;
+    readonly text: string;
+  },
   version: number
 ): Criterion | null {
   const id = input.id.trim();
@@ -909,6 +1209,7 @@ function createCriterion(
   return {
     id,
     text,
+    specificCompetenceId: input.specificCompetenceId,
     sourceVersion: formatManualPackageVersion(version),
     ...optionalValue("externalCode", input.externalCode),
     ...optionalValue("title", input.title),
@@ -940,6 +1241,11 @@ function finalizePack(pack: CurriculumPack, version: number, occurredAt: string)
     updatedAt: occurredAt,
     subjects: pack.subjects.map((subject) => ({
       ...subject,
+      ...(subject.specificCompetences
+        ? { specificCompetences: subject.specificCompetences.map(
+            (specificCompetence) => ({ ...specificCompetence })
+          ) }
+        : {}),
       criteria: subject.criteria.map((criterion) => ({ ...criterion })),
       basicKnowledge: subject.basicKnowledge.map((knowledge) => ({
         ...knowledge,
@@ -985,6 +1291,7 @@ function updateCriterionMetadata(
   criterion: Criterion,
   text: string,
   externalCode: string | null | undefined,
+  specificCompetenceId: string,
   title: string | null | undefined,
   version: number
 ): Criterion {
@@ -992,9 +1299,25 @@ function updateCriterionMetadata(
   return {
     ...base,
     text,
+    specificCompetenceId,
     sourceVersion: formatManualPackageVersion(version),
     ...optionalValue("externalCode", externalCode),
     ...optionalValue("title", title),
+  };
+}
+
+function updateSpecificCompetenceMetadata(
+  specificCompetence: SpecificCompetence,
+  text: string,
+  externalCode: string | null | undefined,
+  version: number
+): SpecificCompetence {
+  const base = withoutOptionalKeys(specificCompetence, ["externalCode"]);
+  return {
+    ...base,
+    text,
+    sourceVersion: formatManualPackageVersion(version),
+    ...optionalValue("externalCode", externalCode),
   };
 }
 
@@ -1031,12 +1354,23 @@ function findSubject(pack: CurriculumPack, subjectId: string): CurriculumSubject
 }
 
 function findEntity(pack: CurriculumPack, id: string): {
-  readonly type: "pack" | "subject" | "criterion" | "basic-knowledge";
-  readonly value: CurriculumPack | CurriculumSubject | Criterion | BasicKnowledge;
+  readonly type: "pack" | "subject" | "specific-competence" | "criterion" | "basic-knowledge";
+  readonly value:
+    | CurriculumPack
+    | CurriculumSubject
+    | SpecificCompetence
+    | Criterion
+    | BasicKnowledge;
 } | null {
   if (pack.id === id) return { type: "pack", value: pack };
   for (const subject of pack.subjects) {
     if (subject.id === id) return { type: "subject", value: subject };
+    const specificCompetence = subject.specificCompetences?.find(
+      (candidate) => candidate.id === id
+    );
+    if (specificCompetence) {
+      return { type: "specific-competence", value: specificCompetence };
+    }
     const criterion = subject.criteria.find((candidate) => candidate.id === id);
     if (criterion) return { type: "criterion", value: criterion };
     const knowledge = subject.basicKnowledge.find((candidate) => candidate.id === id);
@@ -1263,8 +1597,10 @@ function dependencyOrigin(
   kind: CurriculumCatalogDependency["kind"]
 ): CurriculumCatalogDependency["origin"] {
   switch (kind) {
+    case "contained-specific-competence":
     case "contained-criterion":
     case "contained-basic-knowledge":
+    case "specific-competence-criterion":
     case "knowledge-criterion":
       return "catalog";
     case "profile-subject":

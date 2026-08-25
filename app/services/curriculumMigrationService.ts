@@ -79,6 +79,35 @@ export function planCurriculumMigration(
     updatedAt: plannedAt,
   };
   const conflicts: CurriculumMigrationConflict[] = [];
+  curriculumSubjects.forEach((subject, subjectIndex) => {
+    if (!subject.specificCompetences) {
+      conflicts.push(conflict(
+        "missing-specific-competence",
+        subjectIndex,
+        "A legacy subject without specific competences requires explicit review.",
+        undefined,
+        subject.id,
+        subject
+      ));
+      return;
+    }
+    const competenceIds = new Set(subject.specificCompetences.map((item) => item.id));
+    subject.criteria.forEach((criterion) => {
+      if (
+        typeof criterion.specificCompetenceId !== "string"
+        || !competenceIds.has(criterion.specificCompetenceId)
+      ) {
+        conflicts.push(conflict(
+          "missing-specific-competence",
+          subjectIndex,
+          "A legacy criterion without one valid same-subject competence requires explicit review.",
+          undefined,
+          criterion.id,
+          criterion
+        ));
+      }
+    });
+  });
   const proposedLinks = new Map<string, ActionCurricularLink>();
   const preservedActionIds = new Set<string>();
   const duplicateActionSources = collectDuplicateActionSources(input.legacyActions);
@@ -253,22 +282,31 @@ function createProvisionalSubjects(): CurriculumSubject[] {
     id: `curriculum-subject:legacy:${subject.id}`,
     legacySubjectId: subject.id,
     name: subject.name,
+    specificCompetences: [],
     criteria: [],
     basicKnowledge: [],
   }));
 }
 
 function canonicalizeSubjects(subjects: readonly CurriculumSubject[]): CurriculumSubject[] {
-  return subjects.map((subject) => ({
-    ...subject,
-    criteria: subject.criteria
-      .map((criterion) => ({ ...criterion }))
-      .sort((left, right) => compareStableText(left.id, right.id)),
-    basicKnowledge: subject.basicKnowledge.map((knowledge) => ({
-      ...knowledge,
-      criterionIds: [...knowledge.criterionIds].sort(),
-    })).sort((left, right) => compareStableText(left.id, right.id)),
-  })).sort((left, right) => compareStableText(left.id, right.id));
+  return subjects.map((subject) => {
+    const { specificCompetences, ...subjectWithoutCompetences } = subject;
+    return {
+      ...subjectWithoutCompetences,
+      ...(specificCompetences === undefined
+      ? {}
+      : {
+          specificCompetences: specificCompetences.map((competence) => ({
+            ...competence,
+          })),
+        }),
+      criteria: subject.criteria.map((criterion) => ({ ...criterion })),
+      basicKnowledge: subject.basicKnowledge.map((knowledge) => ({
+        ...knowledge,
+        criterionIds: [...knowledge.criterionIds],
+      })),
+    };
+  });
 }
 
 function readLegacyAction(value: unknown): LegacyAction | null {

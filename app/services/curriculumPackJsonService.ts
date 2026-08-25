@@ -1,10 +1,12 @@
 import {
+  CURRICULUM_LEGACY_SCHEMA_VERSION,
   CURRICULUM_SCHEMA_VERSION,
   type BasicKnowledge,
   type Criterion,
   type CurriculumPack,
   type CurriculumProvenance,
   type CurriculumSubject,
+  type SpecificCompetence,
   type VersionedCurriculumData,
 } from "../types/curriculum";
 import {
@@ -14,8 +16,11 @@ import {
 import { validateCurriculumData } from "./curriculumValidationService";
 
 export const CURRICULUM_PACK_JSON_FORMAT = "cristalclass.curriculum-pack" as const;
-export const CURRICULUM_PACK_JSON_SCHEMA_VERSION = 1 as const;
-export const CURRICULUM_PACK_CHECKSUM_PREFIX = "curriculum-pack-content-v1:" as const;
+/** Exchange-envelope versions; independent from the pack's curriculum schemaVersion. */
+export const CURRICULUM_PACK_JSON_LEGACY_SCHEMA_VERSION = 1 as const;
+export const CURRICULUM_PACK_JSON_SCHEMA_VERSION = 2 as const;
+export const CURRICULUM_PACK_LEGACY_CHECKSUM_PREFIX = "curriculum-pack-content-v1:" as const;
+export const CURRICULUM_PACK_CHECKSUM_PREFIX = "curriculum-pack-content-v2:" as const;
 
 /**
  * `contentChecksum` is an integrity fingerprint, not an authenticity primitive.
@@ -24,7 +29,9 @@ export const CURRICULUM_PACK_CHECKSUM_PREFIX = "curriculum-pack-content-v1:" as 
  * then calculates two unsigned 32-bit rolling hashes over UTF-16 code units: a
  * forward FNV-1a-style pass (seed 2166136261, multiplier 16777619) and a reverse
  * pass (seed 3339675911, multiplier 2246822519). Their base-36 texts are
- * concatenated after `curriculum-pack-content-v1:`.
+ * concatenated after the versioned `curriculum-pack-content-vN:` prefix. The
+ * current v2 content contract includes ordered specific competences and every
+ * criterion-to-competence relation; the recognized legacy v1 contract does not.
  *
  * It detects ordinary accidental changes and binds a preview to content, but it is
  * not collision resistant, is not a digital signature, proves no authorship, and
@@ -43,6 +50,7 @@ export const CURRICULUM_PACK_CHECKSUM_SEMANTICS = Object.freeze({
 /** Every listed array is order-significant, including `criterionIds`. */
 export const CURRICULUM_PACK_ARRAY_ORDER_SEMANTICS = Object.freeze({
   subjects: "significant",
+  specificCompetences: "significant",
   criteria: "significant",
   basicKnowledge: "significant",
   criterionIds: "significant",
@@ -50,6 +58,26 @@ export const CURRICULUM_PACK_ARRAY_ORDER_SEMANTICS = Object.freeze({
 
 export type CurriculumPackContentChecksum =
   `${typeof CURRICULUM_PACK_CHECKSUM_PREFIX}${string}`;
+
+/** Runtime-refined schema-v2 catalog exposed only after strict validation. */
+export type CurriculumPackJsonCurrentPack = Omit<CurriculumPack, "subjects"> & {
+  readonly schemaVersion: typeof CURRICULUM_SCHEMA_VERSION;
+  readonly subjects: readonly (Omit<CurriculumSubject, "specificCompetences" | "criteria"> & {
+    readonly specificCompetences: readonly SpecificCompetence[];
+    readonly criteria: readonly (Criterion & { readonly specificCompetenceId: string })[];
+  })[];
+};
+
+/** Runtime-refined schema-v1 shape; competence fields are structurally absent. */
+export type CurriculumPackJsonLegacyPack = Omit<CurriculumPack, "subjects"> & {
+  readonly schemaVersion: typeof CURRICULUM_LEGACY_SCHEMA_VERSION;
+  readonly subjects: readonly (Omit<CurriculumSubject, "specificCompetences" | "criteria"> & {
+    readonly specificCompetences?: never;
+    readonly criteria: readonly (Omit<Criterion, "specificCompetenceId"> & {
+      readonly specificCompetenceId?: never;
+    })[];
+  })[];
+};
 
 /**
  * Text limits are JavaScript UTF-16 code units, not Unicode code points or encoded
@@ -61,6 +89,8 @@ export interface CurriculumPackJsonLimits {
   readonly maxJsonTextLength: number;
   readonly maxDepth: number;
   readonly maxSubjects: number;
+  readonly maxSpecificCompetencesPerSubject: number;
+  readonly maxSpecificCompetencesTotal: number;
   readonly maxCriteriaPerSubject: number;
   readonly maxCriteriaTotal: number;
   readonly maxBasicKnowledgePerSubject: number;
@@ -78,6 +108,8 @@ export const DEFAULT_CURRICULUM_PACK_JSON_LIMITS: CurriculumPackJsonLimits = Obj
   maxJsonTextLength: 2_000_000,
   maxDepth: 24,
   maxSubjects: 100,
+  maxSpecificCompetencesPerSubject: 500,
+  maxSpecificCompetencesTotal: 5_000,
   maxCriteriaPerSubject: 500,
   maxCriteriaTotal: 5_000,
   maxBasicKnowledgePerSubject: 1_000,
@@ -108,7 +140,17 @@ export interface CurriculumPackJsonEnvelope {
   readonly exporterVersion?: string;
   /** Integrity fingerprint only; see `CURRICULUM_PACK_CHECKSUM_SEMANTICS`. */
   readonly contentChecksum: CurriculumPackContentChecksum;
-  readonly pack: CurriculumPack;
+  readonly pack: CurriculumPackJsonCurrentPack;
+}
+
+export interface CurriculumPackJsonLegacyEnvelope {
+  readonly format: typeof CURRICULUM_PACK_JSON_FORMAT;
+  readonly schemaVersion: typeof CURRICULUM_PACK_JSON_LEGACY_SCHEMA_VERSION;
+  readonly exportedAt: string;
+  readonly exporterVersion?: string;
+  readonly contentChecksum: `${typeof CURRICULUM_PACK_LEGACY_CHECKSUM_PREFIX}${string}`;
+  /** Exact schema-v1 shape; no competences or criterion relation are synthesized. */
+  readonly pack: CurriculumPackJsonLegacyPack;
 }
 
 export type CurriculumPackJsonIssueCode =
@@ -124,7 +166,9 @@ export type CurriculumPackJsonIssueCode =
   | "invalid-schema-version"
   | "invalid-provenance"
   | "invalid-source-version"
+  | "legacy-incomplete"
   | "duplicate-id"
+  | "duplicate-external-code"
   | "duplicate-reference"
   | "broken-reference"
   | "external-code-used-as-identity"
@@ -170,6 +214,7 @@ export type CurriculumPackJsonParseResult =
       readonly foundSchemaVersion?: number;
       readonly supportedSchemaVersion: typeof CURRICULUM_PACK_JSON_SCHEMA_VERSION;
     }
+  | CurriculumPackJsonLegacyResult
   | {
       readonly status: "unsafe-structure";
       readonly message: string;
@@ -201,10 +246,23 @@ export type CurriculumPackJsonParseResult =
 export interface CurriculumPackJsonValidResult {
   readonly status: "valid";
   readonly envelope: CurriculumPackJsonEnvelope;
-  readonly pack: CurriculumPack;
+  readonly pack: CurriculumPackJsonCurrentPack;
   readonly contentChecksum: CurriculumPackContentChecksum;
   /** Exact collision-safe equality companion to the non-cryptographic checksum. */
   readonly canonicalContent: string;
+}
+
+/**
+ * Safely recognized schema v1. It is deliberately not a valid/importable result:
+ * competence ownership is absent and requires an explicit reviewed migration.
+ */
+export interface CurriculumPackJsonLegacyResult {
+  readonly status: "legacy-incomplete";
+  readonly envelope: CurriculumPackJsonLegacyEnvelope;
+  readonly pack: CurriculumPackJsonLegacyPack;
+  readonly contentChecksum: `${typeof CURRICULUM_PACK_LEGACY_CHECKSUM_PREFIX}${string}`;
+  readonly canonicalContent: string;
+  readonly issues: readonly CurriculumPackJsonIssue[];
 }
 
 export interface CurriculumJsonTextScanResult {
@@ -217,6 +275,10 @@ export interface CurriculumJsonTextScanResult {
 type PackInspection = CurriculumPackJsonValidationResult & {
   readonly pack: CurriculumPack | null;
 };
+
+type CurriculumPackExchangeSchemaVersion =
+  | typeof CURRICULUM_PACK_JSON_LEGACY_SCHEMA_VERSION
+  | typeof CURRICULUM_PACK_JSON_SCHEMA_VERSION;
 
 const DANGEROUS_KEYS = new Set(["__proto__", "prototype", "constructor"]);
 const PROVENANCE_KINDS = new Set([
@@ -259,7 +321,12 @@ export function serializeCurriculumPackToJson(
   options: SerializeCurriculumPackJsonOptions = {}
 ): string {
   const limits = resolveCurriculumPackJsonLimits(options.limits);
-  const inspection = inspectCurriculumPack(pack, limits, false);
+  const inspection = inspectCurriculumPack(
+    pack,
+    limits,
+    false,
+    CURRICULUM_PACK_JSON_SCHEMA_VERSION
+  );
   if (!inspection.valid || !inspection.pack) {
     throw new Error(formatValidationFailure("Cannot serialize an invalid curriculum pack", inspection));
   }
@@ -272,7 +339,7 @@ export function serializeCurriculumPackToJson(
     limits.maxVersionLength,
     "exporterVersion"
   );
-  const portablePack = projectCurriculumPack(inspection.pack);
+  const portablePack = projectCurriculumPack(inspection.pack) as CurriculumPackJsonCurrentPack;
   const envelope: CurriculumPackJsonEnvelope = {
     format: CURRICULUM_PACK_JSON_FORMAT,
     schemaVersion: CURRICULUM_PACK_JSON_SCHEMA_VERSION,
@@ -380,7 +447,10 @@ export function parseCurriculumPackJson(
       "A numeric integer schemaVersion is required."
     )]);
   }
-  if (parsed.schemaVersion !== CURRICULUM_PACK_JSON_SCHEMA_VERSION) {
+  if (
+    parsed.schemaVersion !== CURRICULUM_PACK_JSON_LEGACY_SCHEMA_VERSION
+    && parsed.schemaVersion !== CURRICULUM_PACK_JSON_SCHEMA_VERSION
+  ) {
     return deepFreeze({
       status: "unsupported-schema-version",
       message: "The curriculum exchange schema version is not supported and was not converted.",
@@ -390,6 +460,7 @@ export function parseCurriculumPackJson(
       supportedSchemaVersion: CURRICULUM_PACK_JSON_SCHEMA_VERSION,
     });
   }
+  const exchangeSchemaVersion = parsed.schemaVersion as CurriculumPackExchangeSchemaVersion;
 
   const rootIssues: CurriculumPackJsonIssue[] = [];
   inspectObjectKeys(
@@ -401,9 +472,12 @@ export function parseCurriculumPackJson(
   );
   inspectStringField(parsed, "exportedAt", "$", 64, rootIssues, { isoInstant: true });
   inspectStringField(parsed, "contentChecksum", "$", 200, rootIssues);
+  const expectedChecksumPattern = exchangeSchemaVersion === CURRICULUM_PACK_JSON_SCHEMA_VERSION
+    ? /^curriculum-pack-content-v2:[0-9a-z]{2,14}$/
+    : /^curriculum-pack-content-v1:[0-9a-z]{2,14}$/;
   if (
     typeof parsed.contentChecksum === "string"
-    && !/^curriculum-pack-content-v1:[0-9a-z]{2,14}$/.test(parsed.contentChecksum)
+    && !expectedChecksumPattern.test(parsed.contentChecksum)
   ) {
     rootIssues.push(issue(
       "invalid-string",
@@ -420,7 +494,12 @@ export function parseCurriculumPackJson(
     return invalidRoot("The curriculum exchange envelope is invalid.", rootIssues);
   }
 
-  const inspection = inspectCurriculumPack(parsed.pack, limits, true);
+  const inspection = inspectCurriculumPack(
+    parsed.pack,
+    limits,
+    true,
+    exchangeSchemaVersion
+  );
   if (inspection.limitIssues.length > 0) return limitsExceeded(inspection.limitIssues);
   if (inspection.referenceIssues.length > 0) {
     return deepFreeze({
@@ -437,8 +516,11 @@ export function parseCurriculumPackJson(
     });
   }
 
-  const expectedChecksum = calculateCurriculumPackContentChecksum(inspection.pack);
-  const foundChecksum = parsed.contentChecksum as CurriculumPackContentChecksum;
+  const expectedChecksum = calculateCurriculumPackContentChecksumForVersion(
+    inspection.pack,
+    exchangeSchemaVersion
+  );
+  const foundChecksum = parsed.contentChecksum as string;
   if (expectedChecksum !== foundChecksum) {
     return deepFreeze({
       status: "checksum-mismatch",
@@ -448,7 +530,34 @@ export function parseCurriculumPackJson(
     });
   }
 
-  const pack = deepFreeze(projectCurriculumPack(inspection.pack));
+  const projectedPack = deepFreeze(projectCurriculumPack(inspection.pack));
+  if (exchangeSchemaVersion === CURRICULUM_PACK_JSON_LEGACY_SCHEMA_VERSION) {
+    const legacyPack = projectedPack as CurriculumPackJsonLegacyPack;
+    const legacyChecksum = foundChecksum as CurriculumPackJsonLegacyResult["contentChecksum"];
+    const envelope: CurriculumPackJsonLegacyEnvelope = deepFreeze({
+      format: CURRICULUM_PACK_JSON_FORMAT,
+      schemaVersion: CURRICULUM_PACK_JSON_LEGACY_SCHEMA_VERSION,
+      exportedAt: parsed.exportedAt as string,
+      ...(typeof parsed.exporterVersion === "string"
+        ? { exporterVersion: parsed.exporterVersion }
+        : {}),
+      contentChecksum: legacyChecksum,
+      pack: legacyPack,
+    });
+    return deepFreeze({
+      status: "legacy-incomplete",
+      envelope,
+      pack: legacyPack,
+      contentChecksum: legacyChecksum,
+      canonicalContent: serializeCurriculumPackContentForVersion(
+        legacyPack,
+        CURRICULUM_PACK_JSON_LEGACY_SCHEMA_VERSION
+      ),
+      issues: collectLegacyIncompleteIssues(legacyPack),
+    });
+  }
+  const pack = projectedPack as CurriculumPackJsonCurrentPack;
+  const currentChecksum = foundChecksum as CurriculumPackContentChecksum;
   const envelope = deepFreeze({
     format: CURRICULUM_PACK_JSON_FORMAT,
     schemaVersion: CURRICULUM_PACK_JSON_SCHEMA_VERSION,
@@ -456,14 +565,14 @@ export function parseCurriculumPackJson(
     ...(typeof parsed.exporterVersion === "string"
       ? { exporterVersion: parsed.exporterVersion }
       : {}),
-    contentChecksum: foundChecksum,
+    contentChecksum: currentChecksum,
     pack,
   });
   return deepFreeze({
     status: "valid",
     envelope,
     pack,
-    contentChecksum: foundChecksum,
+    contentChecksum: currentChecksum,
     canonicalContent: serializeCurriculumPackContent(pack),
   });
 }
@@ -472,11 +581,22 @@ export function parseCurriculumPackJson(
 export function calculateCurriculumPackContentChecksum(
   pack: CurriculumPack
 ): CurriculumPackContentChecksum {
-  const portablePack = projectCurriculumPack(pack);
-  const content = Object.fromEntries(
-    Object.entries(portablePack).filter(([key]) => key !== "createdAt" && key !== "updatedAt")
-  );
-  return `${CURRICULUM_PACK_CHECKSUM_PREFIX}${createCurriculumDeterministicFingerprint(content)}`;
+  return calculateCurriculumPackContentChecksumForVersion(
+    pack,
+    CURRICULUM_PACK_JSON_SCHEMA_VERSION
+  ) as CurriculumPackContentChecksum;
+}
+
+function calculateCurriculumPackContentChecksumForVersion(
+  pack: CurriculumPack,
+  exchangeSchemaVersion: CurriculumPackExchangeSchemaVersion
+): string {
+  const prefix = exchangeSchemaVersion === CURRICULUM_PACK_JSON_SCHEMA_VERSION
+    ? CURRICULUM_PACK_CHECKSUM_PREFIX
+    : CURRICULUM_PACK_LEGACY_CHECKSUM_PREFIX;
+  return `${prefix}${createCurriculumDeterministicFingerprint(
+    curriculumPackContentValue(pack, exchangeSchemaVersion)
+  )}`;
 }
 
 export function validateCurriculumPackForJson(
@@ -487,7 +607,8 @@ export function validateCurriculumPackForJson(
     const inspection = inspectCurriculumPack(
       value,
       resolveCurriculumPackJsonLimits(options.limits),
-      false
+      false,
+      CURRICULUM_PACK_JSON_SCHEMA_VERSION
     );
     return deepFreeze({
       valid: inspection.valid,
@@ -518,11 +639,53 @@ export function validateCurriculumPackForJson(
  * non-cryptographic checksum alone, decides content equality.
  */
 export function serializeCurriculumPackContent(pack: CurriculumPack): string {
+  return serializeCurriculumPackContentForVersion(pack, CURRICULUM_PACK_JSON_SCHEMA_VERSION);
+}
+
+function serializeCurriculumPackContentForVersion(
+  pack: CurriculumPack,
+  exchangeSchemaVersion: CurriculumPackExchangeSchemaVersion
+): string {
+  return serializeCurriculumFingerprintValue(
+    curriculumPackContentValue(pack, exchangeSchemaVersion)
+  );
+}
+
+function curriculumPackContentValue(
+  pack: CurriculumPack,
+  exchangeSchemaVersion: CurriculumPackExchangeSchemaVersion
+): Readonly<Record<string, unknown>> {
   const portablePack = projectCurriculumPack(pack);
   const content = Object.fromEntries(
     Object.entries(portablePack).filter(([key]) => key !== "createdAt" && key !== "updatedAt")
   );
-  return serializeCurriculumFingerprintValue(content);
+  if (exchangeSchemaVersion === CURRICULUM_PACK_JSON_LEGACY_SCHEMA_VERSION) {
+    return {
+      ...content,
+      schemaVersion: CURRICULUM_LEGACY_SCHEMA_VERSION,
+      subjects: portablePack.subjects.map((subject) => ({
+        id: subject.id,
+        ...(subject.externalCode !== undefined ? { externalCode: subject.externalCode } : {}),
+        ...(subject.legacySubjectId !== undefined
+          ? { legacySubjectId: subject.legacySubjectId }
+          : {}),
+        name: subject.name,
+        criteria: subject.criteria.map((criterion) => ({
+          id: criterion.id,
+          ...(criterion.externalCode !== undefined
+            ? { externalCode: criterion.externalCode }
+            : {}),
+          ...(criterion.sourceVersion !== undefined
+            ? { sourceVersion: criterion.sourceVersion }
+            : {}),
+          ...(criterion.title !== undefined ? { title: criterion.title } : {}),
+          text: criterion.text,
+        })),
+        basicKnowledge: subject.basicKnowledge.map(projectBasicKnowledge),
+      })),
+    };
+  }
+  return content;
 }
 
 /** Exact content identity; deliberately never reduced to checksum equality. */
@@ -553,7 +716,8 @@ export function projectCurriculumPack(pack: CurriculumPack): CurriculumPack {
 function inspectCurriculumPack(
   value: unknown,
   limits: CurriculumPackJsonLimits,
-  rejectUnexpectedProperties: boolean
+  rejectUnexpectedProperties: boolean,
+  exchangeSchemaVersion: CurriculumPackExchangeSchemaVersion
 ): PackInspection {
   const issues: CurriculumPackJsonIssue[] = [];
   const referenceIssues: CurriculumPackJsonIssue[] = [];
@@ -590,11 +754,14 @@ function inspectCurriculumPack(
   });
   inspectStringField(value, "createdAt", "pack", 64, issues, { isoInstant: true });
   inspectStringField(value, "updatedAt", "pack", 64, issues, { isoInstant: true });
-  if (value.schemaVersion !== CURRICULUM_SCHEMA_VERSION) {
+  const requiredPackSchemaVersion = exchangeSchemaVersion === CURRICULUM_PACK_JSON_SCHEMA_VERSION
+    ? CURRICULUM_SCHEMA_VERSION
+    : CURRICULUM_LEGACY_SCHEMA_VERSION;
+  if (value.schemaVersion !== requiredPackSchemaVersion) {
     issues.push(issue(
       "invalid-schema-version",
       "pack.schemaVersion",
-      `Pack schemaVersion must be ${CURRICULUM_SCHEMA_VERSION}.`
+      `Pack schemaVersion must be ${requiredPackSchemaVersion} for exchange schema ${exchangeSchemaVersion}.`
     ));
   }
   inspectProvenance(value.provenance, limits, issues, rejectUnexpectedProperties);
@@ -613,8 +780,12 @@ function inspectCurriculumPack(
       }
       inspectObjectKeys(
         subject,
-        ["id", "externalCode", "legacySubjectId", "name", "criteria", "basicKnowledge"],
-        ["id", "name", "criteria", "basicKnowledge"],
+        exchangeSchemaVersion === CURRICULUM_PACK_JSON_SCHEMA_VERSION
+          ? ["id", "externalCode", "legacySubjectId", "name", "specificCompetences", "criteria", "basicKnowledge"]
+          : ["id", "externalCode", "legacySubjectId", "name", "criteria", "basicKnowledge"],
+        exchangeSchemaVersion === CURRICULUM_PACK_JSON_SCHEMA_VERSION
+          ? ["id", "name", "specificCompetences", "criteria", "basicKnowledge"]
+          : ["id", "name", "criteria", "basicKnowledge"],
         path,
         issues,
         rejectUnexpectedProperties
@@ -627,6 +798,32 @@ function inspectCurriculumPack(
         [["externalCode", limits.maxCodeLength], ["legacySubjectId", limits.maxIdentifierLength]],
         issues
       );
+
+      if (exchangeSchemaVersion === CURRICULUM_PACK_JSON_SCHEMA_VERSION) {
+        if (!Array.isArray(subject.specificCompetences)) {
+          issues.push(issue(
+            "invalid-type",
+            `${path}.specificCompetences`,
+            "Specific competences must be an array in exchange schema v2."
+          ));
+        } else {
+          inspectEntityLimit(
+            subject.specificCompetences.length,
+            limits.maxSpecificCompetencesPerSubject,
+            `${path}.specificCompetences`,
+            limitIssues
+          );
+          subject.specificCompetences.forEach((competence, competenceIndex) => {
+            inspectSpecificCompetence(
+              competence,
+              `${path}.specificCompetences[${competenceIndex}]`,
+              limits,
+              issues,
+              rejectUnexpectedProperties
+            );
+          });
+        }
+      }
 
       if (!Array.isArray(subject.criteria)) {
         issues.push(issue("invalid-type", `${path}.criteria`, "Criteria must be an array."));
@@ -643,7 +840,8 @@ function inspectCurriculumPack(
           `${path}.criteria[${criterionIndex}]`,
           limits,
           issues,
-          rejectUnexpectedProperties
+          rejectUnexpectedProperties,
+          exchangeSchemaVersion
         ));
       }
 
@@ -673,6 +871,17 @@ function inspectCurriculumPack(
       }
     });
     inspectEntityLimit(criteriaTotal, limits.maxCriteriaTotal, "pack.criteriaTotal", limitIssues);
+    const competenceTotal = value.subjects.reduce((total, subject) => (
+      total + (isJsonObject(subject) && Array.isArray(subject.specificCompetences)
+        ? subject.specificCompetences.length
+        : 0)
+    ), 0);
+    inspectEntityLimit(
+      competenceTotal,
+      limits.maxSpecificCompetencesTotal,
+      "pack.specificCompetencesTotal",
+      limitIssues
+    );
     inspectEntityLimit(
       knowledgeTotal,
       limits.maxBasicKnowledgeTotal,
@@ -688,16 +897,45 @@ function inspectCurriculumPack(
   const pack = projectCurriculumPack(value as unknown as CurriculumPack);
   const sharedValidation = validateCurriculumData(createValidationAggregate([pack]), []);
   sharedValidation.issues.forEach((sharedIssue) => {
+    if (sharedIssue.severity === "warning") return;
+    const sharedCode = sharedIssue.code as string;
+    if (
+      exchangeSchemaVersion === CURRICULUM_PACK_JSON_LEGACY_SCHEMA_VERSION
+      && [
+        "legacy-catalog-incomplete",
+        "missing-specific-competence-collection",
+        "unassigned-specific-competence",
+      ].includes(sharedCode)
+    ) {
+      return;
+    }
+    const isReferenceIssue = [
+      "missing-criterion-reference",
+      "cross-subject-criterion-reference",
+      "missing-specific-competence-reference",
+      "cross-subject-specific-competence-reference",
+    ].includes(sharedCode);
+    const isDuplicateExternalCode = sharedCode.startsWith("duplicate-")
+      && sharedCode.endsWith("-external-code");
+    const isSourceVersionIssue = [
+      "invalid-source-version",
+      "future-source-version",
+    ].includes(sharedCode);
     const mapped = issue(
-      sharedIssue.code === "missing-criterion-reference"
+      isReferenceIssue
         ? "broken-reference"
-        : sharedIssue.code === "duplicate-internal-id"
+        : sharedCode === "duplicate-internal-id"
           ? "duplicate-id"
-          : "external-code-used-as-identity",
+          : isDuplicateExternalCode
+            ? "duplicate-external-code"
+          : isSourceVersionIssue
+            ? "invalid-source-version"
+            : "external-code-used-as-identity",
       sharedIssue.path.replace(/^packs\[0\]/, "pack"),
       sharedIssue.message
     );
-    if (sharedIssue.code === "missing-criterion-reference") referenceIssues.push(mapped);
+    if (isReferenceIssue) referenceIssues.push(mapped);
+    else if (isSourceVersionIssue) sourceVersionIssues.push(mapped);
     else issues.push(mapped);
   });
   sourceVersionIssues.push(...inspectSourceVersions(pack));
@@ -747,7 +985,8 @@ function inspectCriterion(
   path: string,
   limits: CurriculumPackJsonLimits,
   issues: CurriculumPackJsonIssue[],
-  rejectUnexpectedProperties: boolean
+  rejectUnexpectedProperties: boolean,
+  exchangeSchemaVersion: CurriculumPackExchangeSchemaVersion
 ): void {
   if (!isJsonObject(value)) {
     issues.push(issue("invalid-type", path, "Criterion must be an object."));
@@ -755,13 +994,26 @@ function inspectCriterion(
   }
   inspectObjectKeys(
     value,
-    ["id", "externalCode", "sourceVersion", "title", "text"],
-    ["id", "text"],
+    exchangeSchemaVersion === CURRICULUM_PACK_JSON_SCHEMA_VERSION
+      ? ["id", "externalCode", "specificCompetenceId", "sourceVersion", "title", "text"]
+      : ["id", "externalCode", "sourceVersion", "title", "text"],
+    exchangeSchemaVersion === CURRICULUM_PACK_JSON_SCHEMA_VERSION
+      ? ["id", "specificCompetenceId", "text"]
+      : ["id", "text"],
     path,
     issues,
     rejectUnexpectedProperties
   );
   inspectStringField(value, "id", path, limits.maxIdentifierLength, issues);
+  if (exchangeSchemaVersion === CURRICULUM_PACK_JSON_SCHEMA_VERSION) {
+    inspectStringField(
+      value,
+      "specificCompetenceId",
+      path,
+      limits.maxIdentifierLength,
+      issues
+    );
+  }
   inspectStringField(value, "text", path, limits.maxTextLength, issues);
   inspectOptionalStringFields(
     value,
@@ -771,6 +1023,36 @@ function inspectCriterion(
       ["sourceVersion", limits.maxVersionLength],
       ["title", limits.maxNameLength],
     ],
+    issues
+  );
+}
+
+function inspectSpecificCompetence(
+  value: unknown,
+  path: string,
+  limits: CurriculumPackJsonLimits,
+  issues: CurriculumPackJsonIssue[],
+  rejectUnexpectedProperties: boolean
+): void {
+  if (!isJsonObject(value)) {
+    issues.push(issue("invalid-type", path, "Specific competence must be an object."));
+    return;
+  }
+  inspectObjectKeys(
+    value,
+    ["id", "externalCode", "sourceVersion", "text"],
+    ["id", "sourceVersion", "text"],
+    path,
+    issues,
+    rejectUnexpectedProperties
+  );
+  inspectStringField(value, "id", path, limits.maxIdentifierLength, issues);
+  inspectStringField(value, "sourceVersion", path, limits.maxVersionLength, issues);
+  inspectStringField(value, "text", path, limits.maxTextLength, issues);
+  inspectOptionalStringFields(
+    value,
+    path,
+    [["externalCode", limits.maxCodeLength]],
     issues
   );
 }
@@ -852,6 +1134,14 @@ function inspectSourceVersions(pack: CurriculumPack): CurriculumPackJsonIssue[] 
   }
   const issues: CurriculumPackJsonIssue[] = [];
   pack.subjects.forEach((subject, subjectIndex) => {
+    subject.specificCompetences?.forEach((competence, competenceIndex) => {
+      inspectManualEntityVersion(
+        competence.sourceVersion,
+        packageRevision,
+        `pack.subjects[${subjectIndex}].specificCompetences[${competenceIndex}].sourceVersion`,
+        issues
+      );
+    });
     subject.criteria.forEach((criterion, criterionIndex) => {
       inspectManualEntityVersion(
         criterion.sourceVersion,
@@ -870,6 +1160,29 @@ function inspectSourceVersions(pack: CurriculumPack): CurriculumPackJsonIssue[] 
     });
   });
   return issues;
+}
+
+function collectLegacyIncompleteIssues(pack: CurriculumPack): readonly CurriculumPackJsonIssue[] {
+  const issues: CurriculumPackJsonIssue[] = [issue(
+    "legacy-incomplete",
+    "pack.schemaVersion",
+    "Schema-v1 catalogs contain no specific-competence ownership and require explicit reviewed migration."
+  )];
+  pack.subjects.forEach((subject, subjectIndex) => {
+    issues.push(issue(
+      "legacy-incomplete",
+      `pack.subjects[${subjectIndex}].specificCompetences`,
+      "The legacy subject has no specific-competence collection; none was synthesized."
+    ));
+    subject.criteria.forEach((_criterion, criterionIndex) => {
+      issues.push(issue(
+        "legacy-incomplete",
+        `pack.subjects[${subjectIndex}].criteria[${criterionIndex}].specificCompetenceId`,
+        "The legacy criterion has no competence assignment; none was inferred."
+      ));
+    });
+  });
+  return deduplicateIssues(issues);
 }
 
 function inspectManualEntityVersion(
@@ -1424,8 +1737,22 @@ function projectSubject(subject: CurriculumSubject): CurriculumSubject {
     ...(subject.externalCode !== undefined ? { externalCode: subject.externalCode } : {}),
     ...(subject.legacySubjectId !== undefined ? { legacySubjectId: subject.legacySubjectId } : {}),
     name: subject.name,
+    ...(subject.specificCompetences !== undefined
+      ? { specificCompetences: subject.specificCompetences.map(projectSpecificCompetence) }
+      : {}),
     criteria: subject.criteria.map(projectCriterion),
     basicKnowledge: subject.basicKnowledge.map(projectBasicKnowledge),
+  };
+}
+
+function projectSpecificCompetence(competence: SpecificCompetence): SpecificCompetence {
+  return {
+    id: competence.id,
+    ...(competence.externalCode !== undefined ? { externalCode: competence.externalCode } : {}),
+    ...(competence.sourceVersion !== undefined
+      ? { sourceVersion: competence.sourceVersion }
+      : {}),
+    text: competence.text,
   };
 }
 
@@ -1433,6 +1760,9 @@ function projectCriterion(criterion: Criterion): Criterion {
   return {
     id: criterion.id,
     ...(criterion.externalCode !== undefined ? { externalCode: criterion.externalCode } : {}),
+    ...(criterion.specificCompetenceId !== undefined
+      ? { specificCompetenceId: criterion.specificCompetenceId }
+      : {}),
     ...(criterion.sourceVersion !== undefined ? { sourceVersion: criterion.sourceVersion } : {}),
     ...(criterion.title !== undefined ? { title: criterion.title } : {}),
     text: criterion.text,

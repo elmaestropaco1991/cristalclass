@@ -15,6 +15,7 @@ import {
 } from "./curriculumMigrationApplicationService";
 import {
   calculateCurriculumContentChecksum,
+  calculateLegacyCurriculumContentChecksum,
   createCurriculumStorageEnvelope,
   createCurriculumTransactionId,
   getBrowserCurriculumStorage,
@@ -39,6 +40,8 @@ export interface CurriculumStorageDeterministicCheck {
 const CLASSROOM_ID = "classroom-storage-check";
 const FIRST_INSTANT = "2026-08-24T10:00:00.000Z";
 const SECOND_INSTANT = "2026-08-25T10:00:00.000Z";
+/** Captured by executing HEAD 32a2293's checksum code over createHeadV1StorageData(). */
+const HEAD_V1_STORAGE_CHECKSUM = "curriculum-content-v1:12wgvee1j2yj9o";
 
 export async function runCurriculumStorageDeterministicChecks(): Promise<
   readonly CurriculumStorageDeterministicCheck[]
@@ -88,6 +91,137 @@ export async function runCurriculumStorageDeterministicChecks(): Promise<
       });
       return readCurriculumState(storage, CLASSROOM_ID, preview.knownActionIds).status
         === "incompatible-version";
+    }),
+    check("schema-v1 curriculum is recognized for explicit review without writes", () => {
+      const storage = new MemoryCurriculumStorage();
+      const envelope = createHeadV1StorageEnvelope();
+      storage.seed(getCurriculumStorageKeys("legacy-class").current, envelope);
+      storage.resetCounters();
+      const result = readCurriculumState(storage, "legacy-class", []);
+      return result.status === "legacy-review-required"
+        && result.foundSchemaVersion === 1
+        && envelope.contentChecksum === HEAD_V1_STORAGE_CHECKSUM
+        && storage.writeCount === 0
+        && storage.removeCount === 0;
+    }),
+    check("schema-v1 checksum retains historical criterionIds order-insensitivity", () => {
+      const first = createHeadV1StorageData();
+      const second: VersionedCurriculumData = {
+        ...first,
+        packs: first.packs.map((pack) => ({
+          ...pack,
+          subjects: pack.subjects.map((subject) => ({
+            ...subject,
+            basicKnowledge: subject.basicKnowledge.map((knowledge) => ({
+              ...knowledge,
+              criterionIds: [...knowledge.criterionIds].reverse(),
+            })),
+          })),
+        })),
+      };
+      return calculateLegacyCurriculumContentChecksum(first) === HEAD_V1_STORAGE_CHECKSUM
+        && calculateLegacyCurriculumContentChecksum(second) === HEAD_V1_STORAGE_CHECKSUM;
+    }),
+    check("tampered checksum-invalid and hybrid schema-v1 storage are rejected", () => {
+      const key = getCurriculumStorageKeys("legacy-class").current;
+      const tamperedStorage = new MemoryCurriculumStorage();
+      const checksumStorage = new MemoryCurriculumStorage();
+      const hybridStorage = new MemoryCurriculumStorage();
+      const envelope = createHeadV1StorageEnvelope();
+      tamperedStorage.seed(key, {
+        ...envelope,
+        curriculumData: {
+          ...envelope.curriculumData,
+          packs: envelope.curriculumData.packs.map((pack) => ({
+            ...pack,
+            name: "Manipulated legacy pack",
+          })),
+        },
+      });
+      checksumStorage.seed(key, { ...envelope, contentChecksum: "curriculum-content-v1:wrong" });
+      const hybridData: VersionedCurriculumData = {
+        ...envelope.curriculumData,
+        packs: envelope.curriculumData.packs.map((pack) => ({
+          ...pack,
+          subjects: pack.subjects.map((subject) => ({
+            ...subject,
+            specificCompetences: [{
+              id: "hybrid-competence",
+              sourceVersion: "legacy-v1",
+              text: "Not valid in schema v1",
+            }],
+          })),
+        })),
+      };
+      hybridStorage.seed(key, {
+        ...envelope,
+        curriculumData: hybridData,
+        contentChecksum: calculateLegacyCurriculumContentChecksum(hybridData),
+      });
+      return readCurriculumState(tamperedStorage, "legacy-class", []).status === "corrupt"
+        && readCurriculumState(checksumStorage, "legacy-class", []).status === "corrupt"
+        && readCurriculumState(hybridStorage, "legacy-class", []).status === "corrupt";
+    }),
+    check("a schema-v1 pack in current data is diagnosed without automatic migration", () => {
+      const storage = new MemoryCurriculumStorage();
+      const preview = createPreview(CLASSROOM_ID);
+      const envelope = createEnvelope(preview, 1, FIRST_INSTANT);
+      storage.seed(getCurriculumStorageKeys(CLASSROOM_ID).current, {
+        ...envelope,
+        curriculumData: {
+          ...envelope.curriculumData,
+          packs: envelope.curriculumData.packs.map((pack) => ({
+            ...pack,
+            schemaVersion: 1,
+            subjects: pack.subjects.map((subject) => ({
+              id: subject.id,
+              externalCode: subject.externalCode,
+              legacySubjectId: subject.legacySubjectId,
+              name: subject.name,
+              criteria: subject.criteria.map((criterion) => ({
+                id: criterion.id,
+                externalCode: criterion.externalCode,
+                sourceVersion: criterion.sourceVersion,
+                title: criterion.title,
+                text: criterion.text,
+              })),
+              basicKnowledge: subject.basicKnowledge.map((knowledge) => ({
+                ...knowledge,
+                criterionIds: [...knowledge.criterionIds],
+              })),
+            })),
+          })),
+        },
+        contentChecksum: calculateCurriculumContentChecksum({
+          ...envelope.curriculumData,
+          packs: envelope.curriculumData.packs.map((pack) => ({
+            ...pack,
+            schemaVersion: 1,
+            subjects: pack.subjects.map((subject) => ({
+              id: subject.id,
+              externalCode: subject.externalCode,
+              legacySubjectId: subject.legacySubjectId,
+              name: subject.name,
+              criteria: subject.criteria.map((criterion) => ({
+                id: criterion.id,
+                externalCode: criterion.externalCode,
+                sourceVersion: criterion.sourceVersion,
+                title: criterion.title,
+                text: criterion.text,
+              })),
+              basicKnowledge: subject.basicKnowledge.map((knowledge) => ({
+                ...knowledge,
+                criterionIds: [...knowledge.criterionIds],
+              })),
+            })),
+          })),
+        }),
+      });
+      storage.resetCounters();
+      const result = readCurriculumState(storage, CLASSROOM_ID, preview.knownActionIds);
+      return result.status === "legacy-review-required"
+        && storage.writeCount === 0
+        && storage.removeCount === 0;
     }),
     check("stored data for another classroom is rejected", () => {
       const storage = new MemoryCurriculumStorage();
@@ -453,6 +587,39 @@ export async function runCurriculumStorageDeterministicChecks(): Promise<
       return calculateCurriculumContentChecksum(enriched)
         === calculateCurriculumContentChecksum(reordered);
     }),
+    check("checksum includes competence and criterion relation order", () => {
+      const preview = createPreview(CLASSROOM_ID);
+      const enriched = addSecondResolvedCriterion(preview.targetData);
+      const withSecondCompetence: VersionedCurriculumData = {
+        ...enriched,
+        packs: enriched.packs.map((pack) => ({
+          ...pack,
+          subjects: pack.subjects.map((subject) => ({
+            ...subject,
+            specificCompetences: [
+              ...subject.specificCompetences!,
+              { id: "competence:music:2", text: "Segunda competencia." },
+            ],
+          })),
+        })),
+      };
+      const reordered: VersionedCurriculumData = {
+        ...withSecondCompetence,
+        packs: withSecondCompetence.packs.map((pack) => ({
+          ...pack,
+          subjects: pack.subjects.map((subject) => ({
+            ...subject,
+            specificCompetences: [...subject.specificCompetences!].reverse(),
+            basicKnowledge: subject.basicKnowledge.map((knowledge) => ({
+              ...knowledge,
+              criterionIds: [...knowledge.criterionIds].reverse(),
+            })),
+          })),
+        })),
+      };
+      return calculateCurriculumContentChecksum(withSecondCompetence)
+        !== calculateCurriculumContentChecksum(reordered);
+    }),
     check("special classroom identifiers produce unambiguous keys and preserve identity", () => {
       const classroomIds = ["class:a", "class/a", "class a", "clase con espacios", "clase-ñ", "class%3Aa"];
       const keys = classroomIds.map((classroomId) => getCurriculumStorageKeys(classroomId).current);
@@ -533,6 +700,58 @@ export async function runCurriculumStorageDeterministicChecks(): Promise<
       return typeof navigator !== "undefined" || getBrowserCurriculumExclusiveLock() === null;
     }),
   ]);
+}
+
+function createHeadV1StorageData(): VersionedCurriculumData {
+  return {
+    schemaVersion: 1,
+    module: {
+      schemaVersion: 1,
+      classroomId: "legacy-class",
+      status: "inactive",
+      activeProfileId: null,
+    },
+    packs: [{
+      id: "legacy-pack",
+      schemaVersion: 1,
+      packageVersion: "legacy-v1",
+      name: "Legacy real",
+      provenance: { kind: "external", sourceId: "fixture-head" },
+      createdAt: FIRST_INSTANT,
+      updatedAt: FIRST_INSTANT,
+      subjects: [{
+        id: "legacy-subject",
+        name: "Legacy subject",
+        criteria: [
+          { id: "criterion-b", text: "B" },
+          { id: "criterion-a", text: "A" },
+        ],
+        basicKnowledge: [{
+          id: "knowledge-1",
+          text: "Knowledge",
+          criterionIds: ["criterion-b", "criterion-a"],
+        }],
+      }],
+    }],
+    profiles: [],
+    actionLinks: [],
+  };
+}
+
+function createHeadV1StorageEnvelope(): CurriculumStorageEnvelope {
+  const curriculumData = createHeadV1StorageData();
+  if (calculateLegacyCurriculumContentChecksum(curriculumData) !== HEAD_V1_STORAGE_CHECKSUM) {
+    throw new Error("The real HEAD schema-v1 checksum fixture changed unexpectedly.");
+  }
+  return {
+    schemaVersion: 1,
+    classroomId: "legacy-class",
+    revision: 1,
+    curriculumData,
+    writtenAt: FIRST_INSTANT,
+    contentChecksum: HEAD_V1_STORAGE_CHECKSUM,
+    lastOperationId: "legacy-operation",
+  };
 }
 
 class MemoryCurriculumStorage implements CurriculumStorageAdapter {
@@ -714,9 +933,16 @@ function createSubject(): CurriculumSubject {
     externalCode: "MUS",
     legacySubjectId: "music",
     name: "Música",
+    specificCompetences: [{
+      id: "competence:music:1",
+      externalCode: "MUS-CE1",
+      sourceVersion: "legacy-v1",
+      text: "Competencia musical específica.",
+    }],
     criteria: [{
       id: "criterion:music:1",
       externalCode: "MUS-1",
+      specificCompetenceId: "competence:music:1",
       sourceVersion: "legacy-v1",
       title: "Criterio musical",
       text: "Texto curricular de prueba.",
@@ -760,6 +986,7 @@ function addSecondResolvedCriterion(data: VersionedCurriculumData): VersionedCur
           {
             id: criterionId,
             externalCode: "MUS-2",
+            specificCompetenceId: subject.specificCompetences![0].id,
             sourceVersion: "legacy-v1",
             text: "Segundo criterio curricular de prueba.",
           },
@@ -786,7 +1013,7 @@ function reverseNonSemanticOrder(data: VersionedCurriculumData): VersionedCurric
         ...subject,
         basicKnowledge: subject.basicKnowledge.map((knowledge) => ({
           ...knowledge,
-          criterionIds: [...knowledge.criterionIds].reverse(),
+          criterionIds: [...knowledge.criterionIds],
         })),
       })),
     })),

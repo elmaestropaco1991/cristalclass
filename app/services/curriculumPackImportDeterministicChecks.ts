@@ -34,6 +34,7 @@ import {
   measureCurriculumJsonText,
   measureCurriculumSerializedJson,
 } from "./curriculumStorageBudgetService";
+import { createCurriculumDeterministicFingerprint } from "./curriculumFingerprintService";
 
 export interface CurriculumPackImportDeterministicCheck {
   readonly name: string;
@@ -65,7 +66,7 @@ export function runCurriculumPackImportDeterministicChecks(): readonly Curriculu
       });
       const root = JSON.parse(serialized) as Record<string, unknown>;
       return root.format === CURRICULUM_PACK_JSON_FORMAT
-        && root.schemaVersion === 1
+        && root.schemaVersion === 2
         && typeof root.contentChecksum === "string"
         && isRecord(root.pack);
     }),
@@ -81,11 +82,15 @@ export function runCurriculumPackImportDeterministicChecks(): readonly Curriculu
       return first.contentChecksum === second.contentChecksum
         && first.envelope.exportedAt !== second.envelope.exportedAt;
     }),
-    check("4. pedagogical subject criterion knowledge and relation order is preserved", () => {
+    check("4. pedagogical subject competence criterion knowledge and relation order is preserved", () => {
       const pack = createPack();
       const parsed = requireParsed(serializeCurriculumPackToJson(pack, FIRST_EXPORTED_AT, { pretty: true }));
       return parsed.pack.subjects.map((item) => item.id).join(",") === "subject-language,subject-math"
+        && parsed.pack.subjects[0].specificCompetences?.map((item) => item.id).join(",")
+          === "competence-language-b,competence-language-a"
         && parsed.pack.subjects[0].criteria.map((item) => item.id).join(",") === "criterion-b,criterion-a"
+        && parsed.pack.subjects[0].criteria.map((item) => item.specificCompetenceId).join(",")
+          === "competence-language-b,competence-language-a"
         && parsed.pack.subjects[0].basicKnowledge.map((item) => item.id).join(",") === "knowledge-b,knowledge-a"
         && parsed.pack.subjects[0].basicKnowledge[0].criterionIds.join(",") === "criterion-b,criterion-a";
     }),
@@ -147,7 +152,7 @@ export function runCurriculumPackImportDeterministicChecks(): readonly Curriculu
     }),
     check("16. non-finite JSON numbers are rejected", () => {
       const json = serializeCurriculumPackToJson(createPack(), FIRST_EXPORTED_AT);
-      const nonFinite = json.replace(`\"schemaVersion\":1`, `\"schemaVersion\":1e400`);
+      const nonFinite = json.replace(`\"schemaVersion\":2`, `\"schemaVersion\":1e400`);
       return parseCurriculumPackJson(nonFinite).status === "unsafe-structure";
     }),
     check("17. a completely new pack is applicable and imports once", () => {
@@ -263,6 +268,7 @@ export function runCurriculumPackImportDeterministicChecks(): readonly Curriculu
             idMap: {
               packId: "new-pack",
               subjectIds: {},
+              competenceIds: {},
               criterionIds: {},
               basicKnowledgeIds: {},
             },
@@ -289,6 +295,14 @@ export function runCurriculumPackImportDeterministicChecks(): readonly Curriculu
       return preview.canApply
         && imported?.id === idMap.packId
         && imported.subjects[0].id === idMap.subjectIds[changed.subjects[0].id]
+        && imported.subjects[0].specificCompetences?.map((competence) => competence.id).join(",")
+          === changed.subjects[0].specificCompetences?.map(
+            (competence) => idMap.competenceIds[competence.id]
+          ).join(",")
+        && imported.subjects[0].criteria.map((criterion) => criterion.specificCompetenceId).join(",")
+          === changed.subjects[0].criteria.map((criterion) => (
+            idMap.competenceIds[criterion.specificCompetenceId ?? ""]
+          )).join(",")
         && imported.subjects[0].basicKnowledge[0].criterionIds.join(",")
           === changed.subjects[0].basicKnowledge[0].criterionIds
             .map((id) => idMap.criterionIds[id]).join(",");
@@ -450,14 +464,9 @@ export function runCurriculumPackImportDeterministicChecks(): readonly Curriculu
             }
           : cloneSubject(subject)),
       };
-      const analyzed = analyzePack(duplicated);
-      const state = createEmptyCurriculumPackImportState();
-      const preview = previewCurriculumPackImport(
-        analyzed,
-        state,
-        importRequest(analyzed, "duplicate-code", 0)
-      );
-      return preview.blockingConflicts.some((item) => item.code === "duplicate-external-code");
+      const validation = validateCurriculumPackForJson(duplicated);
+      return !validation.valid
+        && validation.issues.some((item) => item.path.includes("externalCode"));
     }),
     check("38. incoherent sourceVersion is classified defensively in preview", () => {
       const valid = analyzePack(createPack());
@@ -496,16 +505,16 @@ export function runCurriculumPackImportDeterministicChecks(): readonly Curriculu
     check("40. duplicate simple JSON keys are rejected before JSON.parse", () => {
       const json = serializeCurriculumPackToJson(createPack(), FIRST_EXPORTED_AT);
       const duplicated = json.replace(
-        `\"schemaVersion\":1`,
-        `\"schemaVersion\":1,\"schemaVersion\":999`
+        `\"schemaVersion\":2`,
+        `\"schemaVersion\":2,\"schemaVersion\":999`
       );
       return parseCurriculumPackJson(duplicated).status === "duplicate-keys";
     }),
     check("41. escaped JSON keys decoding to the same text are duplicates", () => {
       const json = serializeCurriculumPackToJson(createPack(), FIRST_EXPORTED_AT);
       const duplicated = json.replace(
-        `\"schemaVersion\":1`,
-        `\"schemaVersion\":1,\"schema\\u0056ersion\":999`
+        `\"schemaVersion\":2`,
+        `\"schemaVersion\":2,\"schema\\u0056ersion\":999`
       );
       return parseCurriculumPackJson(duplicated).status === "duplicate-keys";
     }),
@@ -534,14 +543,14 @@ export function runCurriculumPackImportDeterministicChecks(): readonly Curriculu
     }),
     check("45. duplicate and prototype-polluting keys in resolution JSON are rejected", () => {
       const duplicate = parseCurriculumPackImportResolutionJson(
-        `{\"kind\":\"import-as-new\",\"idMap\":{\"packId\":\"p\",\"subjectIds\":{\"s\":\"a\",\"\\u0073\":\"b\"},\"criterionIds\":{},\"basicKnowledgeIds\":{}}}`
+        `{\"kind\":\"import-as-new\",\"idMap\":{\"packId\":\"p\",\"subjectIds\":{\"s\":\"a\",\"\\u0073\":\"b\"},\"competenceIds\":{},\"criterionIds\":{},\"basicKnowledgeIds\":{}}}`
       );
       const dangerous = parseCurriculumPackImportResolutionJson(
-        `{\"kind\":\"import-as-new\",\"idMap\":{\"packId\":\"p\",\"subjectIds\":{\"\\u005f\\u005fproto__\":\"x\"},\"criterionIds\":{},\"basicKnowledgeIds\":{}}}`
+        `{\"kind\":\"import-as-new\",\"idMap\":{\"packId\":\"p\",\"subjectIds\":{\"\\u005f\\u005fproto__\":\"x\"},\"competenceIds\":{},\"criterionIds\":{},\"basicKnowledgeIds\":{}}}`
       );
       const analyzed = analyzePack(createPack());
       const pollutedMap = JSON.parse(
-        `{\"packId\":\"p\",\"subjectIds\":{\"__proto__\":\"polluted\"},\"criterionIds\":{},\"basicKnowledgeIds\":{}}`
+        `{\"packId\":\"p\",\"subjectIds\":{\"__proto__\":\"polluted\"},\"competenceIds\":{},\"criterionIds\":{},\"basicKnowledgeIds\":{}}`
       ) as CurriculumPackImportIdMap;
       const programmatic = previewCurriculumPackImport(
         analyzed,
@@ -591,6 +600,10 @@ export function runCurriculumPackImportDeterministicChecks(): readonly Curriculu
         serializeCurriculumPackToJson(createPack(), FIRST_EXPORTED_AT)
       );
       criterionWithExtra.pack.subjects[0].criteria[0].unknown = true;
+      const competenceWithExtra = JSON.parse(
+        serializeCurriculumPackToJson(createPack(), FIRST_EXPORTED_AT)
+      );
+      competenceWithExtra.pack.subjects[0].specificCompetences[0].unknown = true;
       const knowledgeWithExtra = JSON.parse(
         serializeCurriculumPackToJson(createPack(), FIRST_EXPORTED_AT)
       );
@@ -616,6 +629,7 @@ export function runCurriculumPackImportDeterministicChecks(): readonly Curriculu
       return parseCurriculumPackJson(JSON.stringify(rootWithExtra)).status === "invalid-root"
         && parseCurriculumPackJson(JSON.stringify(packWithExtra)).status === "invalid-pack"
         && parseCurriculumPackJson(JSON.stringify(subjectWithExtra)).status === "invalid-pack"
+        && parseCurriculumPackJson(JSON.stringify(competenceWithExtra)).status === "invalid-pack"
         && parseCurriculumPackJson(JSON.stringify(criterionWithExtra)).status === "invalid-pack"
         && parseCurriculumPackJson(JSON.stringify(knowledgeWithExtra)).status === "invalid-pack"
         && parseCurriculumPackJson(JSON.stringify(malformedChecksum)).status === "invalid-root"
@@ -673,6 +687,40 @@ export function runCurriculumPackImportDeterministicChecks(): readonly Curriculu
           ...pack,
           subjects: [{
             ...firstSubject,
+            specificCompetences: firstSubject.specificCompetences?.map(
+              (competence, index) => index === 0
+                ? { ...competence, text: "Competencia específica modificada." }
+                : { ...competence }
+            ),
+          }, ...pack.subjects.slice(1)],
+        },
+        {
+          ...pack,
+          subjects: [{
+            ...firstSubject,
+            specificCompetences: firstSubject.specificCompetences?.map(
+              (competence, index) => index === 0
+                ? { ...competence, sourceVersion: "manual-r3" }
+                : { ...competence }
+            ),
+          }, ...pack.subjects.slice(1)],
+        },
+        {
+          ...pack,
+          subjects: [{
+            ...firstSubject,
+            criteria: firstSubject.criteria.map((criterion, index) => index === 0
+              ? {
+                  ...criterion,
+                  specificCompetenceId: firstSubject.specificCompetences?.[1].id,
+                }
+              : { ...criterion }),
+          }, ...pack.subjects.slice(1)],
+        },
+        {
+          ...pack,
+          subjects: [{
+            ...firstSubject,
             basicKnowledge: firstSubject.basicKnowledge.map((knowledge, index) => index === 0
               ? { ...knowledge, criterionIds: [...knowledge.criterionIds].reverse() }
               : { ...knowledge, criterionIds: [...knowledge.criterionIds] }),
@@ -683,6 +731,13 @@ export function runCurriculumPackImportDeterministicChecks(): readonly Curriculu
         {
           ...pack,
           subjects: [{ ...firstSubject, criteria: [...firstSubject.criteria].reverse() }, ...pack.subjects.slice(1)],
+        },
+        {
+          ...pack,
+          subjects: [{
+            ...firstSubject,
+            specificCompetences: [...(firstSubject.specificCompetences ?? [])].reverse(),
+          }, ...pack.subjects.slice(1)],
         },
         {
           ...pack,
@@ -858,7 +913,12 @@ export function runCurriculumPackImportDeterministicChecks(): readonly Curriculu
       return first.canonicalContent === second.canonicalContent
         && first.contentChecksum === second.contentChecksum
         && second.pack.subjects.length > 1
+        && second.pack.subjects[0].specificCompetences?.map(
+          (competence) => competence.id
+        ).join(",") === "competence-language-b,competence-language-a"
         && second.pack.subjects[0].criteria.some((criterion) => criterion.externalCode === undefined)
+        && second.pack.subjects[0].criteria[0].specificCompetenceId
+          === "competence-language-b"
         && second.pack.subjects[0].basicKnowledge[0].criterionIds.length > 1
         && second.pack.subjects.map((subject) => subject.id).join(",")
           === "subject-language,subject-math"
@@ -1047,6 +1107,178 @@ export function runCurriculumPackImportDeterministicChecks(): readonly Curriculu
         && entry.resolutionIdCount > 0
         && !JSON.stringify(entry).includes("idMap");
     }),
+    check("74. exchange schema v1 is recognized as incomplete without inventing competences", () => {
+      const parsed = parseCurriculumPackJson(createLegacyV1Json(createPack()));
+      return parsed.status === "legacy-incomplete"
+        && parsed.pack.schemaVersion === 1
+        && parsed.pack.subjects.every(
+          (subject) => subject.specificCompetences === undefined
+            && subject.criteria.every(
+              (criterion) => criterion.specificCompetenceId === undefined
+            )
+        )
+        && parsed.issues.some((item) => item.code === "legacy-incomplete");
+    }),
+    check("75. schema v1 cannot silently carry schema-v2 competence fields", () => {
+      const root = JSON.parse(createLegacyV1Json(createPack()));
+      root.pack.subjects[0].specificCompetences = createPack().subjects[0].specificCompetences;
+      root.pack.subjects[0].criteria[0].specificCompetenceId = "competence-language-b";
+      return parseCurriculumPackJson(JSON.stringify(root)).status === "invalid-pack";
+    }),
+    check("76. schema v2 requires ordered competences and criterion ownership", () => {
+      const missingCollection = JSON.parse(
+        serializeCurriculumPackToJson(createPack(), FIRST_EXPORTED_AT)
+      );
+      delete missingCollection.pack.subjects[0].specificCompetences;
+      const missingOwnership = JSON.parse(
+        serializeCurriculumPackToJson(createPack(), FIRST_EXPORTED_AT)
+      );
+      delete missingOwnership.pack.subjects[0].criteria[0].specificCompetenceId;
+      const missingSourceVersion = JSON.parse(
+        serializeCurriculumPackToJson(createPack(), FIRST_EXPORTED_AT)
+      );
+      delete missingSourceVersion.pack.subjects[0].specificCompetences[0].sourceVersion;
+      return parseCurriculumPackJson(JSON.stringify(missingCollection)).status === "invalid-pack"
+        && parseCurriculumPackJson(JSON.stringify(missingOwnership)).status === "invalid-pack"
+        && parseCurriculumPackJson(JSON.stringify(missingSourceVersion)).status === "invalid-pack";
+    }),
+    check("77. missing and cross-subject competence references are broken references", () => {
+      const missing = JSON.parse(serializeCurriculumPackToJson(createPack(), FIRST_EXPORTED_AT));
+      missing.pack.subjects[0].criteria[0].specificCompetenceId = "missing-competence";
+      const crossed = JSON.parse(serializeCurriculumPackToJson(createPack(), FIRST_EXPORTED_AT));
+      crossed.pack.subjects[0].criteria[0].specificCompetenceId = "competence-math";
+      return parseCurriculumPackJson(JSON.stringify(missing)).status === "broken-references"
+        && parseCurriculumPackJson(JSON.stringify(crossed)).status === "broken-references";
+    }),
+    check("78. competence content order and criterion relation identify checksum content", () => {
+      const pack = createPack();
+      const subject = pack.subjects[0];
+      const reordered: CurriculumPack = {
+        ...pack,
+        subjects: [{
+          ...subject,
+          specificCompetences: [...(subject.specificCompetences ?? [])].reverse(),
+        }, ...pack.subjects.slice(1)],
+      };
+      const movedCriterion: CurriculumPack = {
+        ...pack,
+        subjects: [{
+          ...subject,
+          criteria: subject.criteria.map((criterion, index) => index === 0
+            ? { ...criterion, specificCompetenceId: "competence-language-a" }
+            : { ...criterion }),
+        }, ...pack.subjects.slice(1)],
+      };
+      return calculateCurriculumPackContentChecksum(reordered)
+          !== calculateCurriculumPackContentChecksum(pack)
+        && calculateCurriculumPackContentChecksum(movedCriterion)
+          !== calculateCurriculumPackContentChecksum(pack);
+    }),
+    check("79. import-as-new requires an exact complete competence ID map", () => {
+      const existing = importOnce(createPack(), "competence-map-base");
+      const changed = changePackText(createPack(), "Mapa de competencias incompleto");
+      const analyzed = analyzePack(changed);
+      const complete = createCompleteIdMap(changed, "competence-map");
+      const competenceIds = { ...complete.competenceIds };
+      delete competenceIds[changed.subjects[0].specificCompetences?.[0].id ?? ""];
+      const preview = previewCurriculumPackImport(
+        analyzed,
+        existing,
+        importRequest(analyzed, "competence-map-incomplete", existing.revision),
+        {
+          resolution: {
+            kind: "import-as-new",
+            idMap: { ...complete, competenceIds },
+          },
+        }
+      );
+      return preview.blockingConflicts.some((item) => item.code === "incomplete-id-map");
+    }),
+    check("80. competence ID maps reject unknown sources and cross-entity target collisions", () => {
+      const existing = importOnce(createPack(), "competence-map-collision-base");
+      const changed = changePackText(createPack(), "Mapa de competencias exacto");
+      const analyzed = analyzePack(changed);
+      const complete = createCompleteIdMap(changed, "competence-collision");
+      const firstCompetence = changed.subjects[0].specificCompetences?.[0].id ?? "";
+      const firstCriterion = changed.subjects[0].criteria[0].id;
+      const unknownPreview = previewCurriculumPackImport(
+        analyzed,
+        existing,
+        importRequest(analyzed, "competence-map-extra", existing.revision),
+        {
+          resolution: {
+            kind: "import-as-new",
+            idMap: {
+              ...complete,
+              competenceIds: { ...complete.competenceIds, unknown: "new-unknown" },
+            },
+          },
+        }
+      );
+      const collisionPreview = previewCurriculumPackImport(
+        analyzed,
+        existing,
+        importRequest(analyzed, "competence-map-collision", existing.revision),
+        {
+          resolution: {
+            kind: "import-as-new",
+            idMap: {
+              ...complete,
+              competenceIds: {
+                ...complete.competenceIds,
+                [firstCompetence]: complete.criterionIds[firstCriterion],
+              },
+            },
+          },
+        }
+      );
+      return unknownPreview.blockingConflicts.some(
+        (item) => item.code === "unexpected-id-map-entry"
+      ) && collisionPreview.blockingConflicts.some(
+        (item) => item.code === "duplicate-new-id"
+      );
+    }),
+    check("81. specific-competence entity limits are configurable and enforced", () => {
+      const json = serializeCurriculumPackToJson(createPack(), FIRST_EXPORTED_AT);
+      return parseCurriculumPackJson(json, {
+        limits: { maxSpecificCompetencesPerSubject: 1 },
+      }).status === "limits-exceeded";
+    }),
+    check("82. duplicate decoded keys inside competence ID maps are rejected", () => {
+      const result = parseCurriculumPackImportResolutionJson(
+        `{\"kind\":\"import-as-new\",\"idMap\":{\"packId\":\"p\",\"subjectIds\":{},\"competenceIds\":{\"competence\":\"a\",\"comp\\u0065tence\":\"b\"},\"criterionIds\":{},\"basicKnowledgeIds\":{}}}`
+      );
+      return result.status === "invalid"
+        && result.conflict.code === "duplicate-resolution-key";
+    }),
+    check("83. a real HEAD v1 fixture is recognized and tampering fails its checksum", () => {
+      const original = parseCurriculumPackJson(createHeadV1JsonFixture());
+      const root = JSON.parse(createHeadV1JsonFixture());
+      root.pack.subjects[0].criteria[0].text = "Legacy content altered";
+      return original.status === "legacy-incomplete"
+        && original.contentChecksum === "curriculum-pack-content-v1:1gl3jydjfefvn"
+        && parseCurriculumPackJson(JSON.stringify(root)).status === "checksum-mismatch";
+    }),
+    check("84. existing legacy catalogs block preview pending explicit reviewed migration", () => {
+      const legacy = parseCurriculumPackJson(createLegacyV1Json(createPack()));
+      if (legacy.status !== "legacy-incomplete") return false;
+      const incoming = analyzePack(remapPackIds(createPack(), "after-legacy"));
+      const state: CurriculumPackImportState = {
+        schemaVersion: 1,
+        revision: 0,
+        packs: [legacy.pack],
+        appliedOperations: [],
+      };
+      const preview = previewCurriculumPackImport(
+        incoming,
+        state,
+        importRequest(incoming, "legacy-state", state.revision)
+      );
+      return !preview.canApply
+        && preview.blockingConflicts.some(
+          (item) => item.code === "legacy-catalog-incomplete"
+        );
+    }),
   ];
 }
 
@@ -1121,10 +1353,16 @@ function createSizedPack(targetCodeUnits: number): CurriculumPack {
     subjects: [{
       id: `budget-subject-${targetCodeUnits}`,
       name: `Budget subject ${targetCodeUnits}`,
+      specificCompetences: [{
+        id: `budget-competence-${targetCodeUnits}`,
+        sourceVersion: "manual-r1",
+        text: "Storage-budget specific competence",
+      }],
       criteria: Array.from({ length: criterionCount }, (_, index) => {
         const prefix = `Criterion ${index} `;
         return {
           id: `budget-criterion-${targetCodeUnits}-${index}`,
+          specificCompetenceId: `budget-competence-${targetCodeUnits}`,
           sourceVersion: "manual-r1",
           text: `${prefix}${"x".repeat(Math.max(0, textLength - prefix.length))}`,
         };
@@ -1206,16 +1444,31 @@ function createPack(): CurriculumPack {
         id: "subject-language",
         externalCode: "LEN",
         name: "Lengua",
+        specificCompetences: [
+          {
+            id: "competence-language-b",
+            externalCode: "LEN-CE2",
+            sourceVersion: "manual-r2",
+            text: "Comprender y producir mensajes orales.",
+          },
+          {
+            id: "competence-language-a",
+            sourceVersion: "manual-r1",
+            text: "Producir textos escritos con intención comunicativa.",
+          },
+        ],
         criteria: [
           {
             id: "criterion-b",
             externalCode: "LEN-2",
+            specificCompetenceId: "competence-language-b",
             sourceVersion: "manual-r2",
             title: "Segundo criterio",
             text: "Comprende mensajes orales.",
           },
           {
             id: "criterion-a",
+            specificCompetenceId: "competence-language-a",
             sourceVersion: "manual-r1",
             text: "Produce textos escritos.",
           },
@@ -1241,9 +1494,16 @@ function createPack(): CurriculumPack {
         id: "subject-math",
         externalCode: "MAT",
         name: "Matemáticas",
+        specificCompetences: [{
+          id: "competence-math",
+          externalCode: "MAT-CE1",
+          sourceVersion: "manual-r3",
+          text: "Resolver situaciones problemáticas mediante razonamiento matemático.",
+        }],
         criteria: [{
           id: "criterion-math",
           externalCode: "MAT-1",
+          specificCompetenceId: "competence-math",
           sourceVersion: "manual-r3",
           text: "Resuelve problemas sencillos.",
         }],
@@ -1281,7 +1541,17 @@ function createExternalPack(
     subjects: [{
       id: subjectId,
       name: "Asignatura",
-      criteria: [{ id: criterionId, sourceVersion: "2026", text: criterionText }],
+      specificCompetences: [{
+        id: `${subjectId}-competence`,
+        sourceVersion: "2026",
+        text: `Competencia ${criterionText}`,
+      }],
+      criteria: [{
+        id: criterionId,
+        specificCompetenceId: `${subjectId}-competence`,
+        sourceVersion: "2026",
+        text: criterionText,
+      }],
       basicKnowledge: [{
         id: knowledgeId,
         sourceVersion: "2026",
@@ -1290,6 +1560,72 @@ function createExternalPack(
       }],
     }],
   };
+}
+
+function createLegacyV1Json(pack: CurriculumPack): string {
+  type MutableCriterion = Record<string, unknown>;
+  type MutableSubject = Record<string, unknown> & {
+    criteria: MutableCriterion[];
+  };
+  type MutableRoot = Record<string, unknown> & {
+    schemaVersion: number;
+    contentChecksum: string;
+    pack: Record<string, unknown> & {
+      schemaVersion: number;
+      subjects: MutableSubject[];
+    };
+  };
+  const root = JSON.parse(
+    serializeCurriculumPackToJson(pack, FIRST_EXPORTED_AT)
+  ) as MutableRoot;
+  root.schemaVersion = 1;
+  root.pack.schemaVersion = 1;
+  root.pack.subjects.forEach((subject) => {
+    delete subject.specificCompetences;
+    subject.criteria.forEach((criterion) => {
+      delete criterion.specificCompetenceId;
+    });
+  });
+  const content = { ...root.pack };
+  delete content.createdAt;
+  delete content.updatedAt;
+  root.contentChecksum = `curriculum-pack-content-v1:${
+    createCurriculumDeterministicFingerprint(content)
+  }`;
+  return JSON.stringify(root);
+}
+
+/** Fixture and checksum captured from HEAD 32a2293's v1 serializer. */
+function createHeadV1JsonFixture(): string {
+  const instant = "2026-08-24T10:00:00.000Z";
+  return JSON.stringify({
+    format: "cristalclass.curriculum-pack",
+    schemaVersion: 1,
+    exportedAt: instant,
+    contentChecksum: "curriculum-pack-content-v1:1gl3jydjfefvn",
+    pack: {
+      id: "legacy-pack",
+      schemaVersion: 1,
+      packageVersion: "legacy-v1",
+      name: "Legacy real",
+      provenance: { kind: "external", sourceId: "fixture-head" },
+      createdAt: instant,
+      updatedAt: instant,
+      subjects: [{
+        id: "legacy-subject",
+        name: "Legacy subject",
+        criteria: [
+          { id: "criterion-b", text: "B" },
+          { id: "criterion-a", text: "A" },
+        ],
+        basicKnowledge: [{
+          id: "knowledge-1",
+          text: "Knowledge",
+          criterionIds: ["criterion-b", "criterion-a"],
+        }],
+      }],
+    },
+  });
 }
 
 function analyzePack(
@@ -1367,9 +1703,16 @@ function remapPackIds(pack: CurriculumPack, prefix: string): CurriculumPack {
     subjects: pack.subjects.map((subject) => ({
       ...subject,
       id: idMap.subjectIds[subject.id],
+      specificCompetences: subject.specificCompetences?.map((competence) => ({
+        ...competence,
+        id: idMap.competenceIds[competence.id],
+      })),
       criteria: subject.criteria.map((criterion) => ({
         ...criterion,
         id: idMap.criterionIds[criterion.id],
+        specificCompetenceId: criterion.specificCompetenceId === undefined
+          ? undefined
+          : idMap.competenceIds[criterion.specificCompetenceId],
       })),
       basicKnowledge: subject.basicKnowledge.map((knowledge) => ({
         ...knowledge,
@@ -1387,6 +1730,12 @@ function createCompleteIdMap(pack: CurriculumPack, prefix: string): CurriculumPa
       subject.id,
       `${prefix}:${subject.id}`,
     ])),
+    competenceIds: Object.fromEntries(pack.subjects.flatMap((subject) =>
+      subject.specificCompetences?.map((competence) => [
+        competence.id,
+        `${prefix}:${competence.id}`,
+      ]) ?? []
+    )),
     criterionIds: Object.fromEntries(pack.subjects.flatMap((subject) =>
       subject.criteria.map((criterion) => [criterion.id, `${prefix}:${criterion.id}`])
     )),
@@ -1398,6 +1747,9 @@ function createCompleteIdMap(pack: CurriculumPack, prefix: string): CurriculumPa
 
 function collectEntitySourceVersions(pack: CurriculumPack): string[] {
   return pack.subjects.flatMap((subject) => [
+    ...(subject.specificCompetences?.map(
+      (competence) => competence.sourceVersion ?? "<absent>"
+    ) ?? []),
     ...subject.criteria.map((criterion) => criterion.sourceVersion ?? "<absent>"),
     ...subject.basicKnowledge.map((knowledge) => knowledge.sourceVersion ?? "<absent>"),
   ]);
@@ -1406,6 +1758,9 @@ function collectEntitySourceVersions(pack: CurriculumPack): string[] {
 function cloneSubject(subject: CurriculumPack["subjects"][number]): CurriculumPack["subjects"][number] {
   return {
     ...subject,
+    ...(subject.specificCompetences !== undefined
+      ? { specificCompetences: subject.specificCompetences.map((competence) => ({ ...competence })) }
+      : {}),
     criteria: subject.criteria.map((criterion) => ({ ...criterion })),
     basicKnowledge: subject.basicKnowledge.map((knowledge) => ({
       ...knowledge,

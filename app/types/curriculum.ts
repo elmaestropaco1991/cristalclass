@@ -1,4 +1,5 @@
-export const CURRICULUM_SCHEMA_VERSION = 1 as const;
+export const CURRICULUM_LEGACY_SCHEMA_VERSION = 1 as const;
+export const CURRICULUM_SCHEMA_VERSION = 2 as const;
 
 export type CurriculumModuleStatus = "inactive" | "configured" | "active";
 export type EvidenceEffect = "positive" | "contrary";
@@ -22,12 +23,29 @@ export interface Criterion {
   readonly id: string;
   readonly externalCode?: string;
   /**
+   * Stable identity of the single specific competence this criterion belongs to.
+   * It is optional only so schema-v1 catalogs can be represented without inventing
+   * a relation; every new schema-v2 criterion must provide it.
+   */
+  readonly specificCompetenceId?: string;
+  /**
    * Source catalog version. Legacy `Action.attitudinalCriterionLinks.catalogVersion`
    * is matched against this field, never against the editor revision. In a manual
    * pack it records the `packageVersion` that last changed this criterion content.
    */
   readonly sourceVersion?: string;
   readonly title?: string;
+  readonly text: string;
+}
+
+export interface SpecificCompetence {
+  readonly id: string;
+  readonly externalCode?: string;
+  /**
+   * Source catalog version that last changed the competence code or official text.
+   * Pedagogical reordering alone does not change this value.
+   */
+  readonly sourceVersion?: string;
   readonly text: string;
 }
 
@@ -48,6 +66,11 @@ export interface CurriculumSubject {
   readonly externalCode?: string;
   readonly legacySubjectId?: string;
   readonly name: string;
+  /**
+   * Pedagogically ordered specific competences. Absence identifies a legacy schema-v1
+   * shape pending explicit review; readers must not synthesize an empty collection.
+   */
+  readonly specificCompetences?: readonly SpecificCompetence[];
   readonly criteria: readonly Criterion[];
   readonly basicKnowledge: readonly BasicKnowledge[];
 }
@@ -130,6 +153,7 @@ export type CurriculumMigrationConflictKind =
   | "corrupt-action"
   | "duplicate-action"
   | "unknown-subject"
+  | "missing-specific-competence"
   | "missing-profile"
   | "missing-criterion"
   | "missing-basic-knowledge"
@@ -261,7 +285,14 @@ export interface CurriculumCatalogSubjectInput {
 export interface CurriculumCatalogCriterionInput {
   readonly id: string;
   readonly externalCode?: string;
+  readonly specificCompetenceId: string;
   readonly title?: string;
+  readonly text: string;
+}
+
+export interface CurriculumCatalogSpecificCompetenceInput {
+  readonly id: string;
+  readonly externalCode?: string;
   readonly text: string;
 }
 
@@ -309,6 +340,26 @@ export type CurriculumCatalogCommand =
       readonly subjectIds: readonly string[];
     })
   | (CurriculumCatalogCommandBase & {
+      readonly type: "add-specific-competence";
+      readonly packId: string;
+      readonly subjectId: string;
+      readonly specificCompetence: CurriculumCatalogSpecificCompetenceInput;
+    })
+  | (CurriculumCatalogCommandBase & {
+      readonly type: "update-specific-competence";
+      readonly packId: string;
+      readonly subjectId: string;
+      readonly specificCompetenceId: string;
+      readonly externalCode?: string | null;
+      readonly text: string;
+    })
+  | (CurriculumCatalogCommandBase & {
+      readonly type: "reorder-specific-competences";
+      readonly packId: string;
+      readonly subjectId: string;
+      readonly specificCompetenceIds: readonly string[];
+    })
+  | (CurriculumCatalogCommandBase & {
       readonly type: "add-criterion";
       readonly packId: string;
       readonly subjectId: string;
@@ -320,8 +371,16 @@ export type CurriculumCatalogCommand =
       readonly subjectId: string;
       readonly criterionId: string;
       readonly externalCode?: string | null;
+      readonly specificCompetenceId?: string;
       readonly title?: string | null;
       readonly text: string;
+    })
+  | (CurriculumCatalogCommandBase & {
+      readonly type: "set-criterion-specific-competence";
+      readonly packId: string;
+      readonly subjectId: string;
+      readonly criterionId: string;
+      readonly specificCompetenceId: string;
     })
   | (CurriculumCatalogCommandBase & {
       readonly type: "reorder-criteria";
@@ -362,6 +421,12 @@ export type CurriculumCatalogCommand =
       readonly subjectId: string;
     })
   | (CurriculumCatalogCommandBase & {
+      readonly type: "request-remove-specific-competence";
+      readonly packId: string;
+      readonly subjectId: string;
+      readonly specificCompetenceId: string;
+    })
+  | (CurriculumCatalogCommandBase & {
       readonly type: "request-remove-criterion";
       readonly packId: string;
       readonly subjectId: string;
@@ -377,6 +442,7 @@ export type CurriculumCatalogCommand =
 export type CurriculumCatalogEntityType =
   | "pack"
   | "subject"
+  | "specific-competence"
   | "criterion"
   | "basic-knowledge";
 
@@ -386,8 +452,10 @@ export interface CurriculumCatalogAffectedEntity {
 }
 
 export type CurriculumCatalogDependencyKind =
+  | "contained-specific-competence"
   | "contained-criterion"
   | "contained-basic-knowledge"
+  | "specific-competence-criterion"
   | "knowledge-criterion"
   | "profile-subject"
   | "action-link-subject"
@@ -413,6 +481,7 @@ export interface CurriculumCatalogDependency {
 
 export type CurriculumCatalogWarningCode =
   | "duplicate-subject-name"
+  | "duplicate-specific-competence-text"
   | "duplicate-criterion-text"
   | "duplicate-basic-knowledge-text"
   | "no-content-change";
@@ -437,6 +506,8 @@ export type CurriculumCatalogConflictCode =
   | "duplicate-external-code"
   | "invalid-name"
   | "invalid-text"
+  | "missing-specific-competence"
+  | "specific-competence-from-another-subject"
   | "missing-criterion"
   | "criterion-from-another-subject"
   | "invalid-order"

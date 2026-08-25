@@ -21,6 +21,9 @@ export interface CurriculumCatalogEditorDeterministicCheck {
 }
 
 const PACK_ID = "manual-pack-1";
+const MUSIC_COMPETENCE_ID = "competence-music-1";
+const MUSIC_COMPETENCE_2_ID = "competence-music-2";
+const MATH_COMPETENCE_ID = "competence-math-1";
 const INSTANT = "2026-08-24T10:00:00.000Z";
 
 export function runCurriculumCatalogEditorDeterministicChecks(): readonly CurriculumCatalogEditorDeterministicCheck[] {
@@ -68,8 +71,82 @@ export function runCurriculumCatalogEditorDeterministicChecks(): readonly Curric
       );
       return preview.conflicts.some((item) => item.code === "duplicate-id");
     }),
-    check("a valid criterion can be added", () => {
+    check("specific competences can be created with stable identity and source version", () => {
       const state = createSubjectState();
+      const result = applyCatalogCommand(state, addSpecificCompetenceCommand(
+        state,
+        "subject-music",
+        MUSIC_COMPETENCE_ID,
+        "CE-MUS-1",
+        "Interpreta y crea propuestas musicales."
+      ));
+      const competence = result.status === "applied"
+        ? result.pack.subjects[0].specificCompetences?.[0]
+        : undefined;
+      return result.status === "applied"
+        && competence?.id === MUSIC_COMPETENCE_ID
+        && competence.externalCode === "CE-MUS-1"
+        && competence.sourceVersion === `manual-r${state.revision + 1}`;
+    }),
+    check("specific competence codes are unique within a subject", () => {
+      const state = createCompetenceState();
+      const preview = previewCatalogCommand(state, addSpecificCompetenceCommand(
+        state,
+        "subject-music",
+        MUSIC_COMPETENCE_2_ID,
+        " ce-mus-1 ",
+        "Otra competencia"
+      ));
+      return !preview.canApply
+        && preview.conflicts.some((item) => item.code === "duplicate-external-code");
+    }),
+    check("equal competence text warns without merging identities", () => {
+      const state = createCompetenceState();
+      const preview = previewCatalogCommand(state, addSpecificCompetenceCommand(
+        state,
+        "subject-music",
+        MUSIC_COMPETENCE_2_ID,
+        "CE-MUS-2",
+        " primera competencia musical "
+      ));
+      return preview.canApply
+        && preview.warnings.some(
+          (item) => item.code === "duplicate-specific-competence-text"
+        )
+        && preview.proposedPack?.subjects[0].specificCompetences?.length === 2;
+    }),
+    check("competence editing changes sourceVersion but pedagogical reorder does not", () => {
+      const state = createTwoCompetenceState();
+      const subjectBefore = state.pack!.subjects[0];
+      const firstBefore = subjectBefore.specificCompetences![0];
+      const secondBefore = subjectBefore.specificCompetences![1];
+      const edited = applyCatalogCommand(state, command(state, {
+        type: "update-specific-competence",
+        packId: PACK_ID,
+        subjectId: "subject-music",
+        specificCompetenceId: MUSIC_COMPETENCE_ID,
+        externalCode: "CE-MUS-1A",
+        text: "Competencia musical actualizada",
+      }));
+      if (edited.status !== "applied") return false;
+      const editedFirst = edited.pack.subjects[0].specificCompetences![0];
+      const reordered = applyCatalogCommand(edited.state, command(edited.state, {
+        type: "reorder-specific-competences",
+        packId: PACK_ID,
+        subjectId: "subject-music",
+        specificCompetenceIds: [MUSIC_COMPETENCE_2_ID, MUSIC_COMPETENCE_ID],
+      }));
+      if (reordered.status !== "applied") return false;
+      const reorderedCompetences = reordered.pack.subjects[0].specificCompetences!;
+      return firstBefore.sourceVersion !== editedFirst.sourceVersion
+        && editedFirst.sourceVersion === `manual-r${state.revision + 1}`
+        && reorderedCompetences.map((item) => item.id).join(",")
+          === `${MUSIC_COMPETENCE_2_ID},${MUSIC_COMPETENCE_ID}`
+        && reorderedCompetences[0].sourceVersion === secondBefore.sourceVersion
+        && reorderedCompetences[1].sourceVersion === editedFirst.sourceVersion;
+    }),
+    check("a valid criterion can be added", () => {
+      const state = createCompetenceState();
       const result = applyCatalogCommand(state, addCriterionCommand(
         state,
         "subject-music",
@@ -79,10 +156,73 @@ export function runCurriculumCatalogEditorDeterministicChecks(): readonly Curric
       ));
       return result.status === "applied"
         && result.pack.subjects[0].criteria[0].id === "criterion-1"
-        && result.pack.subjects[0].criteria[0].sourceVersion === "manual-r3";
+        && result.pack.subjects[0].criteria[0].specificCompetenceId
+          === MUSIC_COMPETENCE_ID
+        && result.pack.subjects[0].criteria[0].sourceVersion
+          === `manual-r${state.revision + 1}`;
+    }),
+    check("new criteria without an explicit competence are rejected", () => {
+      const state = createCompetenceState();
+      const preview = previewCatalogCommand(state, {
+        ...addCriterionCommand(
+          state,
+          "subject-music",
+          "criterion-without-competence",
+          "MUS-X",
+          "No debe aplicarse"
+        ),
+        criterion: {
+          id: "criterion-without-competence",
+          externalCode: "MUS-X",
+          specificCompetenceId: "   ",
+          text: "No debe aplicarse",
+        },
+      });
+      return !preview.canApply
+        && preview.conflicts.some((item) => item.code === "missing-specific-competence");
+    }),
+    check("a criterion can be moved explicitly between competences of its subject", () => {
+      const state = addCriterion(
+        createTwoCompetenceState(),
+        "criterion-1",
+        "MUS-1",
+        "Criterio musical"
+      );
+      const beforeCompetences = JSON.stringify(
+        state.pack!.subjects[0].specificCompetences
+      );
+      const beforeCriterion = state.pack!.subjects[0].criteria[0];
+      const moved = applyCatalogCommand(state, command(state, {
+        type: "set-criterion-specific-competence",
+        packId: PACK_ID,
+        subjectId: "subject-music",
+        criterionId: "criterion-1",
+        specificCompetenceId: MUSIC_COMPETENCE_2_ID,
+      }));
+      return moved.status === "applied"
+        && moved.pack.subjects[0].criteria[0].specificCompetenceId
+          === MUSIC_COMPETENCE_2_ID
+        && moved.pack.subjects[0].criteria[0].sourceVersion
+          === `manual-r${state.revision + 1}`
+        && moved.pack.subjects[0].criteria[0].sourceVersion !== beforeCriterion.sourceVersion
+        && JSON.stringify(moved.pack.subjects[0].specificCompetences) === beforeCompetences;
+    }),
+    check("moving a criterion to another subject competence is rejected", () => {
+      const state = createCrossSubjectCriterionState();
+      const preview = previewCatalogCommand(state, command(state, {
+        type: "set-criterion-specific-competence",
+        packId: PACK_ID,
+        subjectId: "subject-music",
+        criterionId: "criterion-music",
+        specificCompetenceId: MATH_COMPETENCE_ID,
+      }));
+      return !preview.canApply
+        && preview.conflicts.some(
+          (item) => item.code === "specific-competence-from-another-subject"
+        );
     }),
     check("a repeated external criterion code is blocking", () => {
-      const first = addCriterion(createSubjectState(), "criterion-1", "MUS-1", "Primer texto");
+      const first = addCriterion(createCompetenceState(), "criterion-1", "MUS-1", "Primer texto");
       const preview = previewCatalogCommand(first, addCriterionCommand(
         first,
         "subject-music",
@@ -93,7 +233,7 @@ export function runCurriculumCatalogEditorDeterministicChecks(): readonly Curric
       return preview.conflicts.some((item) => item.code === "duplicate-external-code");
     }),
     check("identical criterion text warns without merging", () => {
-      const first = addCriterion(createSubjectState(), "criterion-1", "MUS-1", "Texto repetido");
+      const first = addCriterion(createCompetenceState(), "criterion-1", "MUS-1", "Texto repetido");
       const preview = previewCatalogCommand(first, addCriterionCommand(
         first,
         "subject-music",
@@ -174,7 +314,7 @@ export function runCurriculumCatalogEditorDeterministicChecks(): readonly Curric
       return preview.conflicts.some((item) => item.code === "invalid-order");
     }),
     check("a stale expected version is rejected", () => {
-      const state = createSubjectState();
+      const state = createCompetenceState();
       const preview = previewCatalogCommand(state, {
         ...addCriterionCommand(state, "subject-music", "criterion-1", "MUS-1", "Texto"),
         expectedVersion: state.revision - 1,
@@ -203,7 +343,7 @@ export function runCurriculumCatalogEditorDeterministicChecks(): readonly Curric
       return preview.conflicts.some((item) => item.code === "operation-id-collision");
     }),
     check("preview performs no mutation or storage access", () => {
-      const state = createSubjectState();
+      const state = createCompetenceState();
       const input = addCriterionCommand(state, "subject-music", "criterion-1", "MUS-1", "Texto");
       const snapshot = JSON.stringify({ state, input });
       let writes = 0;
@@ -223,7 +363,7 @@ export function runCurriculumCatalogEditorDeterministicChecks(): readonly Curric
       return JSON.stringify({ state, input }) === snapshot && writes === 0;
     }),
     check("apply increments the catalog version exactly once", () => {
-      const state = createSubjectState();
+      const state = createCompetenceState();
       const result = applyCatalogCommand(state, addCriterionCommand(
         state,
         "subject-music",
@@ -246,6 +386,36 @@ export function runCurriculumCatalogEditorDeterministicChecks(): readonly Curric
       }), completeDependencyContext([], []));
       return preview.dependencies.some((item) => item.kind === "knowledge-criterion")
         && preview.conflicts.some((item) => item.code === "dependency-blocking");
+    }),
+    check("competence removal reports and deduplicates its dependent criteria", () => {
+      const state = createCriterionState();
+      const preview = previewCatalogCommand(state, command(state, {
+        type: "request-remove-specific-competence",
+        packId: PACK_ID,
+        subjectId: "subject-music",
+        specificCompetenceId: MUSIC_COMPETENCE_ID,
+      }), completeDependencyContext([], []));
+      const dependencies = preview.dependencies.filter(
+        (item) => item.kind === "specific-competence-criterion"
+      );
+      return dependencies.length === 1
+        && dependencies[0].sourceId === "criterion-1"
+        && dependencies[0].targetId === MUSIC_COMPETENCE_ID
+        && preview.conflicts.some((item) => item.code === "dependency-blocking")
+        && preview.conflicts.some((item) => item.code === "decision-required");
+    }),
+    check("subject removal includes its specific competences as dependencies", () => {
+      const state = createCompetenceState();
+      const preview = previewCatalogCommand(state, command(state, {
+        type: "request-remove-subject",
+        packId: PACK_ID,
+        subjectId: "subject-music",
+      }), completeDependencyContext([], []));
+      return preview.dependencies.some((item) =>
+        item.kind === "contained-specific-competence"
+        && item.sourceId === MUSIC_COMPETENCE_ID
+        && item.targetId === "subject-music"
+      );
     }),
     check("subject removal is blocked by a selecting profile", () => {
       const state = createSubjectState();
@@ -372,7 +542,9 @@ export function runCurriculumCatalogEditorDeterministicChecks(): readonly Curric
       return reordered.status === "applied"
         && reordered.pack.subjects[0].criteria.map((item) => item.id).join(",")
           === "criterion-2,criterion-1"
-        && reordered.pack.subjects[0].criteria[1].text === "Texto actualizado";
+        && reordered.pack.subjects[0].criteria[1].text === "Texto actualizado"
+        && reordered.pack.subjects[0].criteria[1].specificCompetenceId
+          === MUSIC_COMPETENCE_ID;
     }),
     check("basic knowledge metadata relations and order can be edited", () => {
       const first = createKnowledgeState();
@@ -470,7 +642,7 @@ export function runCurriculumCatalogEditorDeterministicChecks(): readonly Curric
     check("preview and apply agree for every applicable command", () =>
       verifyPreviewApplyEquivalence()),
     check("external codes with surrounding spaces are detected as duplicates", () => {
-      const first = addCriterion(createSubjectState(), "criterion-1", "MUS-1", "Primero");
+      const first = addCriterion(createCompetenceState(), "criterion-1", "MUS-1", "Primero");
       const preview = previewCatalogCommand(first, addCriterionCommand(
         first,
         "subject-music",
@@ -516,6 +688,37 @@ export function runCurriculumCatalogEditorDeterministicChecks(): readonly Curric
         && preview.conflicts.some((item) =>
           item.path.includes("sourceVersion") && item.code === "invalid-result"
         );
+    }),
+    check("legacy-shaped criteria remain explicit review conflicts without inference", () => {
+      const state = createCriterionState();
+      const subject = state.pack!.subjects[0];
+      const legacySubject = {
+        id: subject.id,
+        name: subject.name,
+        criteria: subject.criteria.map((criterion) => ({
+          id: criterion.id,
+          externalCode: criterion.externalCode,
+          sourceVersion: criterion.sourceVersion,
+          text: criterion.text,
+        })),
+        basicKnowledge: subject.basicKnowledge,
+      };
+      const legacyShaped: CurriculumCatalogEditorState = {
+        ...state,
+        pack: { ...state.pack!, subjects: [legacySubject] },
+      };
+      const snapshot = JSON.stringify(legacyShaped);
+      const preview = previewCatalogCommand(legacyShaped, command(legacyShaped, {
+        type: "update-pack-metadata",
+        packId: PACK_ID,
+        name: "No debe inferirse",
+      }));
+      return !preview.canApply
+        && preview.conflicts.some(
+          (item) => item.code === "missing-specific-competence"
+        )
+        && !JSON.stringify(preview.proposedPack).includes("specificCompetence")
+        && JSON.stringify(legacyShaped) === snapshot;
     }),
   ];
 }
@@ -564,7 +767,8 @@ function addCriterionCommand(
   subjectId: string,
   id: string,
   externalCode: string,
-  text: string
+  text: string,
+  specificCompetenceId = MUSIC_COMPETENCE_ID
 ): Extract<CurriculumCatalogCommand, { type: "add-criterion" }> {
   return {
     type: "add-criterion",
@@ -573,7 +777,25 @@ function addCriterionCommand(
     occurredAt: INSTANT,
     packId: PACK_ID,
     subjectId,
-    criterion: { id, externalCode, text },
+    criterion: { id, externalCode, specificCompetenceId, text },
+  };
+}
+
+function addSpecificCompetenceCommand(
+  state: CurriculumCatalogEditorState,
+  subjectId: string,
+  id: string,
+  externalCode: string,
+  text: string
+): Extract<CurriculumCatalogCommand, { type: "add-specific-competence" }> {
+  return {
+    type: "add-specific-competence",
+    operationId: `add-${id}`,
+    expectedVersion: state.revision,
+    occurredAt: INSTANT,
+    packId: PACK_ID,
+    subjectId,
+    specificCompetence: { id, externalCode, text },
   };
 }
 
@@ -607,8 +829,26 @@ function createTwoSubjectState(): CurriculumCatalogEditorState {
   return addSubject(createSubjectState(), "subject-math", "Matemáticas");
 }
 
+function createCompetenceState(): CurriculumCatalogEditorState {
+  return addSpecificCompetence(
+    createSubjectState(),
+    MUSIC_COMPETENCE_ID,
+    "CE-MUS-1",
+    "Primera competencia musical"
+  );
+}
+
+function createTwoCompetenceState(): CurriculumCatalogEditorState {
+  return addSpecificCompetence(
+    createCompetenceState(),
+    MUSIC_COMPETENCE_2_ID,
+    "CE-MUS-2",
+    "Segunda competencia musical"
+  );
+}
+
 function createCriterionState(): CurriculumCatalogEditorState {
-  return addCriterion(createSubjectState(), "criterion-1", "MUS-1", "Primer criterio");
+  return addCriterion(createCompetenceState(), "criterion-1", "MUS-1", "Primer criterio");
 }
 
 function createTwoCriterionState(): CurriculumCatalogEditorState {
@@ -621,8 +861,36 @@ function createKnowledgeState(): CurriculumCatalogEditorState {
 
 function createCrossSubjectCriterionState(): CurriculumCatalogEditorState {
   const subjects = createTwoSubjectState();
-  const music = addCriterion(subjects, "criterion-music", "MUS-1", "Criterio musical", "subject-music");
-  return addCriterion(music, "criterion-math", "MAT-1", "Criterio matemático", "subject-math");
+  const withMusicCompetence = addSpecificCompetence(
+    subjects,
+    MUSIC_COMPETENCE_ID,
+    "CE-MUS-1",
+    "Competencia musical",
+    "subject-music"
+  );
+  const withMathCompetence = addSpecificCompetence(
+    withMusicCompetence,
+    MATH_COMPETENCE_ID,
+    "CE-MAT-1",
+    "Competencia matemática",
+    "subject-math"
+  );
+  const music = addCriterion(
+    withMathCompetence,
+    "criterion-music",
+    "MUS-1",
+    "Criterio musical",
+    "subject-music",
+    MUSIC_COMPETENCE_ID
+  );
+  return addCriterion(
+    music,
+    "criterion-math",
+    "MAT-1",
+    "Criterio matemático",
+    "subject-math",
+    MATH_COMPETENCE_ID
+  );
 }
 
 function addSubject(
@@ -638,11 +906,25 @@ function addCriterion(
   id: string,
   code: string,
   text: string,
+  subjectId = "subject-music",
+  specificCompetenceId = MUSIC_COMPETENCE_ID
+): CurriculumCatalogEditorState {
+  return requireApplied(applyCatalogCommand(
+    state,
+    addCriterionCommand(state, subjectId, id, code, text, specificCompetenceId)
+  ));
+}
+
+function addSpecificCompetence(
+  state: CurriculumCatalogEditorState,
+  id: string,
+  code: string,
+  text: string,
   subjectId = "subject-music"
 ): CurriculumCatalogEditorState {
   return requireApplied(applyCatalogCommand(
     state,
-    addCriterionCommand(state, subjectId, id, code, text)
+    addSpecificCompetenceCommand(state, subjectId, id, code, text)
   ));
 }
 
@@ -724,8 +1006,19 @@ function verifyManualVersionSequence(): boolean {
     addSubjectCommand(created.state, "subject-music", "Música")
   );
   if (withSubject.status !== "applied") return false;
-  const withA = applyCatalogCommand(withSubject.state, addCriterionCommand(
+  const withCompetence = applyCatalogCommand(
     withSubject.state,
+    addSpecificCompetenceCommand(
+      withSubject.state,
+      "subject-music",
+      MUSIC_COMPETENCE_ID,
+      "CE-MUS-1",
+      "Competencia musical"
+    )
+  );
+  if (withCompetence.status !== "applied") return false;
+  const withA = applyCatalogCommand(withCompetence.state, addCriterionCommand(
+    withCompetence.state,
     "subject-music",
     "criterion-a",
     "MUS-A",
@@ -756,21 +1049,31 @@ function verifyManualVersionSequence(): boolean {
   }));
   if (editedB.status !== "applied") return false;
 
-  const packs = [created.pack, withSubject.pack, withA.pack, withB.pack, renamed.pack, editedB.pack];
+  const packs = [
+    created.pack,
+    withSubject.pack,
+    withCompetence.pack,
+    withA.pack,
+    withB.pack,
+    renamed.pack,
+    editedB.pack,
+  ];
   const finalCriteria = editedB.pack.subjects[0].criteria;
   return packs.every((pack, index) =>
       pack.packageVersion === `manual-r${index + 1}`
       && validatePackWithSharedService(pack)
     )
-    && withA.pack.subjects[0].criteria[0].sourceVersion === "manual-r3"
-    && withB.pack.subjects[0].criteria[0].sourceVersion === "manual-r3"
-    && withB.pack.subjects[0].criteria[1].sourceVersion === "manual-r4"
-    && renamed.pack.subjects[0].criteria[0].sourceVersion === "manual-r3"
-    && renamed.pack.subjects[0].criteria[1].sourceVersion === "manual-r4"
-    && finalCriteria[0].sourceVersion === "manual-r3"
-    && finalCriteria[1].sourceVersion === "manual-r6"
+    && withCompetence.pack.subjects[0].specificCompetences?.[0].sourceVersion
+      === "manual-r3"
+    && withA.pack.subjects[0].criteria[0].sourceVersion === "manual-r4"
+    && withB.pack.subjects[0].criteria[0].sourceVersion === "manual-r4"
+    && withB.pack.subjects[0].criteria[1].sourceVersion === "manual-r5"
+    && renamed.pack.subjects[0].criteria[0].sourceVersion === "manual-r4"
+    && renamed.pack.subjects[0].criteria[1].sourceVersion === "manual-r5"
+    && finalCriteria[0].sourceVersion === "manual-r4"
+    && finalCriteria[1].sourceVersion === "manual-r7"
     && JSON.stringify(finalCriteria[0]) === criterionASnapshot
-    && editedB.state.revision === 6;
+    && editedB.state.revision === 7;
 }
 
 function verifyDurableRetryAfterLaterOperations(): boolean {
@@ -815,6 +1118,12 @@ function verifyAllCommandsWithDeepFrozenInputs(): boolean {
       subjectId: "subject-math",
     }),
     command(result.state, {
+      type: "request-remove-specific-competence",
+      packId: PACK_ID,
+      subjectId: "subject-music",
+      specificCompetenceId: MUSIC_COMPETENCE_2_ID,
+    }),
+    command(result.state, {
       type: "request-remove-criterion",
       packId: PACK_ID,
       subjectId: "subject-music",
@@ -843,7 +1152,7 @@ function verifyPreviewApplyEquivalence(): boolean {
 }
 
 function verifyPreviewOutputIsolation(): boolean {
-  const state = createSubjectState();
+  const state = createCompetenceState();
   const input = addCriterionCommand(
     state,
     "subject-music",
@@ -886,8 +1195,57 @@ function exerciseApplicableCommands(freezeInputs: boolean): {
       name: "Educación musical",
       externalCode: "MUS",
     }),
-    (current) => addCriterionCommand(current, "subject-music", "criterion-1", "MUS-1", "Texto 1"),
-    (current) => addCriterionCommand(current, "subject-music", "criterion-2", "MUS-2", "Texto 2"),
+    (current) => addSpecificCompetenceCommand(
+      current,
+      "subject-music",
+      MUSIC_COMPETENCE_ID,
+      "CE-MUS-1",
+      "Competencia musical 1"
+    ),
+    (current) => addSpecificCompetenceCommand(
+      current,
+      "subject-music",
+      MUSIC_COMPETENCE_2_ID,
+      "CE-MUS-2",
+      "Competencia musical 2"
+    ),
+    (current) => command(current, {
+      type: "update-specific-competence",
+      packId: PACK_ID,
+      subjectId: "subject-music",
+      specificCompetenceId: MUSIC_COMPETENCE_ID,
+      externalCode: "CE-MUS-1A",
+      text: "Competencia musical 1 actualizada",
+    }),
+    (current) => command(current, {
+      type: "reorder-specific-competences",
+      packId: PACK_ID,
+      subjectId: "subject-music",
+      specificCompetenceIds: [MUSIC_COMPETENCE_2_ID, MUSIC_COMPETENCE_ID],
+    }),
+    (current) => addCriterionCommand(
+      current,
+      "subject-music",
+      "criterion-1",
+      "MUS-1",
+      "Texto 1",
+      MUSIC_COMPETENCE_ID
+    ),
+    (current) => addCriterionCommand(
+      current,
+      "subject-music",
+      "criterion-2",
+      "MUS-2",
+      "Texto 2",
+      MUSIC_COMPETENCE_2_ID
+    ),
+    (current) => command(current, {
+      type: "set-criterion-specific-competence",
+      packId: PACK_ID,
+      subjectId: "subject-music",
+      criterionId: "criterion-1",
+      specificCompetenceId: MUSIC_COMPETENCE_2_ID,
+    }),
     (current) => command(current, {
       type: "reorder-criteria",
       packId: PACK_ID,
@@ -901,6 +1259,7 @@ function exerciseApplicableCommands(freezeInputs: boolean): {
       packId: PACK_ID,
       subjectId: "subject-music",
       criterionId: "criterion-1",
+      specificCompetenceId: MUSIC_COMPETENCE_2_ID,
       text: "Texto 1 actualizado",
       title: "Título 1",
     }),
@@ -967,7 +1326,7 @@ function verifyBlankValuesRejected(): boolean {
     "   ",
     "blank-subject"
   ));
-  const subject = createSubjectState();
+  const subject = createCompetenceState();
   const blankCriterion = previewCatalogCommand(subject, addCriterionCommand(
     subject,
     "subject-music",

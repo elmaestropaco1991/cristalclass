@@ -69,6 +69,33 @@ export function runCurriculumMigrationDeterministicChecks(): readonly Curriculum
       return validateCurriculumData(invalid, [action.id]).issues
         .some((issue) => issue.code === "active-module-without-subject");
     }),
+    check("an empty curriculum subject is not ready for activation", () => {
+      const emptySubject: CurriculumSubject = {
+        ...subject,
+        id: "curriculum-subject:empty",
+        specificCompetences: [],
+        criteria: [],
+        basicKnowledge: [],
+      };
+      const onlyEmpty = {
+        ...data,
+        packs: [{ ...data.packs[0], subjects: [emptySubject] }],
+        profiles: [{ ...data.profiles[0], selectedSubjectIds: [emptySubject.id] }],
+        actionLinks: [],
+      };
+      const mixedSelection = {
+        ...data,
+        packs: [{ ...data.packs[0], subjects: [subject, emptySubject] }],
+        profiles: [{
+          ...data.profiles[0],
+          selectedSubjectIds: [subject.id, emptySubject.id],
+        }],
+      };
+      return validateCurriculumData(onlyEmpty, [action.id]).issues
+        .some((issue) => issue.code === "active-module-without-subject")
+        && validateCurriculumData(mixedSelection, [action.id]).issues
+          .some((issue) => issue.code === "active-module-without-subject");
+    }),
     check("deactivation retains packs profiles and links", () => {
       const inactive = changeCurriculumModuleStatus(data, "inactive");
       const configured = changeCurriculumModuleStatus(data, "configured");
@@ -173,12 +200,13 @@ export function runCurriculumMigrationDeterministicChecks(): readonly Curriculum
         && JSON.stringify(reactivated.packs) === JSON.stringify(data.packs)
         && JSON.stringify(reactivated.actionLinks) === JSON.stringify(data.actionLinks);
     }),
-    check("equivalent input order produces exactly the same generated identifiers", () => {
+    check("legacy action order does not affect generated identifiers", () => {
       const secondAction = { ...action, id: "legacy-music-action-2", points: 1 };
       const secondSubject: CurriculumSubject = {
         id: "curriculum-subject:mathematics",
         legacySubjectId: "mathematics",
         name: "Matemáticas",
+        specificCompetences: [],
         criteria: [],
         basicKnowledge: [],
       };
@@ -187,17 +215,53 @@ export function runCurriculumMigrationDeterministicChecks(): readonly Curriculum
         legacyActions: [action, secondAction],
         curriculumSubjects: [subject, secondSubject],
       });
-      const secondOrder = planCurriculumMigration({
+      const actionOrderChanged = planCurriculumMigration({
         ...planInput,
         legacyActions: [secondAction, action],
-        curriculumSubjects: [secondSubject, subject],
+        curriculumSubjects: [subject, secondSubject],
       });
-      return firstOrder.id === secondOrder.id
-        && firstOrder.sourceFingerprint === secondOrder.sourceFingerprint
-        && firstOrder.proposedPack.id === secondOrder.proposedPack.id
-        && firstOrder.proposedProfile.id === secondOrder.proposedProfile.id
+      return firstOrder.id === actionOrderChanged.id
+        && firstOrder.sourceFingerprint === actionOrderChanged.sourceFingerprint
+        && firstOrder.proposedPack.id === actionOrderChanged.proposedPack.id
+        && firstOrder.proposedProfile.id === actionOrderChanged.proposedProfile.id
         && JSON.stringify(firstOrder.proposedLinks.map((link) => link.id))
-          === JSON.stringify(secondOrder.proposedLinks.map((link) => link.id));
+          === JSON.stringify(actionOrderChanged.proposedLinks.map((link) => link.id));
+    }),
+    check("pedagogical subject and entity order is preserved and remains identity-significant", () => {
+      const secondCompetence = {
+        id: "competence:music:2",
+        sourceVersion: "legacy-v1",
+        text: "Segunda competencia en orden pedagógico.",
+      };
+      const orderedSubject: CurriculumSubject = {
+        ...subject,
+        specificCompetences: [secondCompetence, ...subject.specificCompetences!],
+        criteria: [...subject.criteria].reverse(),
+        basicKnowledge: subject.basicKnowledge.map((knowledge) => ({
+          ...knowledge,
+          criterionIds: [...knowledge.criterionIds].reverse(),
+        })),
+      };
+      const ordered = planCurriculumMigration({ ...planInput, curriculumSubjects: [orderedSubject] });
+      const reordered = planCurriculumMigration({
+        ...planInput,
+        curriculumSubjects: [{
+          ...orderedSubject,
+          specificCompetences: [...orderedSubject.specificCompetences!].reverse(),
+        }],
+      });
+      const proposedSubject = ordered.proposedPack.subjects[0];
+      return proposedSubject.id === orderedSubject.id
+        && JSON.stringify(proposedSubject.specificCompetences?.map((item) => item.id))
+          === JSON.stringify(orderedSubject.specificCompetences?.map((item) => item.id))
+        && JSON.stringify(proposedSubject.criteria.map((item) => item.id))
+          === JSON.stringify(orderedSubject.criteria.map((item) => item.id))
+        && JSON.stringify(proposedSubject.basicKnowledge.map((item) => item.id))
+          === JSON.stringify(orderedSubject.basicKnowledge.map((item) => item.id))
+        && JSON.stringify(proposedSubject.basicKnowledge.map((item) => item.criterionIds))
+          === JSON.stringify(orderedSubject.basicKnowledge.map((item) => item.criterionIds))
+        && ordered.proposedPack.id !== reordered.proposedPack.id
+        && proposedSubject.specificCompetences?.[0].sourceVersion === "legacy-v1";
     }),
     check("different classrooms cannot share a profile identity and empty identity is rejected", () => {
       const otherClassPlan = planCurriculumMigration({ ...planInput, classroomId: "classroom-2" });
@@ -248,6 +312,7 @@ export function runCurriculumMigrationDeterministicChecks(): readonly Curriculum
       const secondCriterion = {
         id: "criterion:music:2",
         externalCode: "MUS-2",
+        specificCompetenceId: subject.specificCompetences![0].id,
         sourceVersion: "legacy-v1",
         text: "Segundo criterio de prueba.",
       };
@@ -313,6 +378,133 @@ export function runCurriculumMigrationDeterministicChecks(): readonly Curriculum
       getEffectiveCriterionRelations(data.actionLinks);
       return JSON.stringify(data) === snapshot;
     }),
+    check("manipulated states are rejected without throwing and timestamps are canonical", () => {
+      const manipulated = {
+        ...data,
+        module: { ...data.module, classroomId: null },
+      } as unknown as VersionedCurriculumData;
+      const nonCanonicalTimestamp = {
+        ...data,
+        packs: [{ ...data.packs[0], updatedAt: "2026-08-24" }],
+      };
+      const manipulatedResult = validateCurriculumData(manipulated, [action.id]);
+      const timestampResult = validateCurriculumData(nonCanonicalTimestamp, [action.id]);
+      return !manipulatedResult.valid
+        && manipulatedResult.issues.some((item) => item.code === "invalid-state")
+        && !timestampResult.valid
+        && timestampResult.issues.some((item) => item.code === "invalid-timestamp");
+    }),
+    check("legacy subjects remain incomplete without inferred competences", () => {
+      const legacySubject: CurriculumSubject = {
+        ...subject,
+        specificCompetences: undefined,
+        criteria: subject.criteria.map((criterion) => ({
+          id: criterion.id,
+          externalCode: criterion.externalCode,
+          sourceVersion: criterion.sourceVersion,
+          title: criterion.title,
+          text: criterion.text,
+        })),
+      };
+      const snapshot = JSON.stringify(legacySubject);
+      const legacyPlan = planCurriculumMigration({
+        ...planInput,
+        curriculumSubjects: [Object.freeze(legacySubject)],
+      });
+      return legacyPlan.conflicts.some((item) => item.kind === "missing-specific-competence")
+        && legacyPlan.proposedPack.subjects[0].specificCompetences === undefined
+        && legacyPlan.proposedPack.subjects[0].criteria[0].specificCompetenceId === undefined
+        && JSON.stringify(legacySubject) === snapshot;
+    }),
+    check("cross-subject competence references and future manual versions are rejected", () => {
+      const otherSubject: CurriculumSubject = {
+        id: "subject:other",
+        name: "Otra",
+        specificCompetences: [{ id: "competence:other", text: "Competencia ajena." }],
+        criteria: [],
+        basicKnowledge: [],
+      };
+      const crossed = {
+        ...data,
+        packs: [{
+          ...data.packs[0],
+          subjects: [{
+            ...subject,
+            criteria: [{
+              ...subject.criteria[0],
+              specificCompetenceId: "competence:other",
+            }],
+          }, otherSubject],
+        }],
+      };
+      const future = {
+        ...data,
+        packs: [{
+          ...data.packs[0],
+          packageVersion: "manual-r2",
+          provenance: { kind: "manual" as const },
+          subjects: [{
+            ...subject,
+            specificCompetences: subject.specificCompetences!.map((item) => ({
+              ...item,
+              sourceVersion: "manual-r3",
+            })),
+            criteria: subject.criteria.map((item) => ({ ...item, sourceVersion: "manual-r2" })),
+            basicKnowledge: subject.basicKnowledge.map((item) => ({ ...item, sourceVersion: "manual-r1" })),
+          }],
+        }],
+      };
+      return validateCurriculumData(crossed, [action.id]).issues.some((item) =>
+        item.code === "cross-subject-specific-competence-reference"
+      ) && validateCurriculumData(future, [action.id]).issues.some((item) =>
+        item.code === "future-source-version"
+      );
+    }),
+    check("competence code collisions block while repeated text remains an explicit warning", () => {
+      const duplicateTextData: VersionedCurriculumData = {
+        ...data,
+        packs: data.packs.map((pack) => ({
+          ...pack,
+          subjects: pack.subjects.map((candidate) => ({
+            ...candidate,
+            specificCompetences: [
+              ...candidate.specificCompetences!,
+              {
+                id: "competence:music:duplicate-text",
+                externalCode: "MUS-CE2",
+                sourceVersion: "legacy-v1",
+                text: candidate.specificCompetences![0].text,
+              },
+            ],
+          })),
+        })),
+      };
+      const duplicateCodeData: VersionedCurriculumData = {
+        ...duplicateTextData,
+        packs: duplicateTextData.packs.map((pack) => ({
+          ...pack,
+          subjects: pack.subjects.map((candidate) => ({
+            ...candidate,
+            specificCompetences: candidate.specificCompetences!.map((item, index) =>
+              index === 1
+                ? { ...item, externalCode: candidate.specificCompetences![0].externalCode }
+                : item
+            ),
+          })),
+        })),
+      };
+      const textResult = validateCurriculumData(duplicateTextData, [action.id]);
+      const codeResult = validateCurriculumData(duplicateCodeData, [action.id]);
+      return textResult.valid
+        && textResult.issues.some((item) =>
+          item.code === "duplicate-specific-competence-text" && item.severity === "warning"
+        )
+        && !codeResult.valid
+        && codeResult.issues.some((item) =>
+          item.code === "duplicate-specific-competence-external-code"
+          && item.severity === "error"
+        );
+    }),
     check("the real default action catalog produces no invented curricular links", () => {
       const defaultPlan = planCurriculumMigration({
         classroomId: "classroom-default-check",
@@ -333,9 +525,16 @@ function createValidSubject(): CurriculumSubject {
     externalCode: "MUS",
     legacySubjectId: "music",
     name: "Música",
+    specificCompetences: [{
+      id: "competence:music:1",
+      externalCode: "MUS-CE1",
+      sourceVersion: "legacy-v1",
+      text: "Competencia musical específica.",
+    }],
     criteria: [{
       id: "criterion:music:1",
       externalCode: "MUS-1",
+      specificCompetenceId: "competence:music:1",
       sourceVersion: "legacy-v1",
       title: "Criterio musical",
       text: "Texto curricular de prueba.",
@@ -398,7 +597,7 @@ function createValidData(
       schemaVersion: CURRICULUM_SCHEMA_VERSION,
       packageVersion: "1.0.0",
       name: "Paquete válido",
-      provenance: { kind: "manual" },
+      provenance: { kind: "external" },
       createdAt: PLANNED_AT,
       updatedAt: PLANNED_AT,
       subjects: [subject],
