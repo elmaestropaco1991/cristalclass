@@ -2,6 +2,7 @@ type Props = {
   abierto: boolean;
   onCerrar: () => void;
   onGestionarAlumnos: () => void;
+  onOpenSettings: () => void;
   guardianScale: number;
   onGuardianScaleChange: (guardianScale: number) => void;
   onGuardianScaleReset: () => void;
@@ -11,6 +12,7 @@ export default function SideMenu({
   abierto,
   onCerrar,
   onGestionarAlumnos,
+  onOpenSettings,
   guardianScale,
   onGuardianScaleChange,
   onGuardianScaleReset,
@@ -67,8 +69,13 @@ export default function SideMenu({
             📊 Estadísticas
           </button>
 
-          {/* TODO: Implementar las opciones de configuración. */}
-          <button className="text-left p-4 rounded-xl hover:bg-slate-100 text-lg">
+          <button
+            onClick={() => {
+              onCerrar();
+              onOpenSettings();
+            }}
+            className="text-left p-4 rounded-xl hover:bg-slate-100 text-lg focus-visible:outline-4 focus-visible:outline-cyan-400"
+          >
             ⚙️ Configuración
           </button>
 

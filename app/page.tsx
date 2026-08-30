@@ -5,6 +5,8 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react"
 import Header from "./components/Header";
 import AttendancePanel from "./components/AttendancePanel";
 import ClassroomContextNavigation from "./components/ClassroomContextNavigation";
+import CurriculumAssistant from "./components/CurriculumAssistant";
+import CurriculumSubjectTabs from "./components/CurriculumSubjectTabs";
 import MenuButton from "./components/MenuButton";
 import RandomStudentSelector, {
   type RandomStudentSelectionAnimation,
@@ -14,6 +16,7 @@ import StudentCard from "./components/StudentCard";
 import StudentModal from "./components/StudentModal";
 import StudentManager from "./components/StudentManager";
 import SoundToggleButton from "./components/SoundToggleButton";
+import TeacherSettingsPanel from "./components/TeacherSettingsPanel";
 
 import { useStudents } from "./hooks/useStudents";
 import { useMovements } from "./hooks/useMovements";
@@ -21,10 +24,16 @@ import { useAttendance } from "./hooks/useAttendance";
 import { useRandomStudentSelector } from "./hooks/useRandomStudentSelector";
 import { useSoundPreference } from "./hooks/useSoundPreference";
 import { useClassroomGuardianScale } from "./hooks/useClassroomGuardianScale";
+import { useCurriculumAssistant } from "./hooks/useCurriculumAssistant";
 import { createLegacyApplyStudentAction } from "./services/legacyApplyStudentAction";
 import { preloadActionSounds } from "./services/actionSoundService";
+import { getActionCatalog } from "./services/actionService";
 import { getLocalDateKey, getUserTimeZone } from "./services/attendanceDateService";
 import { resolveClassroomId } from "./services/classroomIdentityService";
+import {
+  getActiveCurriculumSubjects,
+  setCurriculumTrackingEnabled,
+} from "./services/curriculumAssistantService";
 import {
   canApplyStudentActionToday,
   executeStudentActionIfPresent,
@@ -57,6 +66,7 @@ export default function Home() {
   const { movements, registrarMovimiento } = useMovements();
   const { soundEnabled, setSoundEnabled, toggleSound } = useSoundPreference();
   const classroomId = resolveClassroomId(alumnos);
+  const curriculum = useCurriculumAssistant(classroomId);
   const [attendanceTimeZone] = useState(getUserTimeZone);
   const [attendanceLocalDate, setAttendanceLocalDate] = useState(() =>
     getLocalDateKey(new Date(), attendanceTimeZone)
@@ -90,6 +100,12 @@ export default function Home() {
   const isOverviewScale = guardianScale <= 60;
 
   const [menuAbierto, setMenuAbierto] = useState(false);
+  const [configuracionAbierta, setConfiguracionAbierta] = useState(false);
+  const [asistenteCurricularAbierto, setAsistenteCurricularAbierto] = useState(false);
+  const [curriculumActionCatalog, setCurriculumActionCatalog] = useState<ReturnType<typeof getActionCatalog>>([]);
+  const [activeCurriculumSubjectId, setActiveCurriculumSubjectId] = useState<string | null>(null);
+  const curriculumOverlayOpen = configuracionAbierta || asistenteCurricularAbierto;
+  const menuButtonReturnRef = useRef<HTMLDivElement>(null);
   const [gestorAlumnosAbierto, setGestorAlumnosAbierto] = useState(false);
   const [asistenciaAbierta, setAsistenciaAbierta] = useState(false);
   const [selectorAbierto, setSelectorAbierto] = useState(false);
@@ -111,6 +127,20 @@ export default function Home() {
 
   useEffect(() => {
     preloadActionSounds();
+  }, []);
+
+  useEffect(() => {
+    const refreshActionCatalog = () => setCurriculumActionCatalog(readCurriculumActionCatalog());
+    const refreshFromStorage = (event: StorageEvent) => {
+      if (event.key === null || event.key === "cristalclass_actions") refreshActionCatalog();
+    };
+    window.addEventListener("focus", refreshActionCatalog);
+    window.addEventListener("storage", refreshFromStorage);
+    refreshActionCatalog();
+    return () => {
+      window.removeEventListener("focus", refreshActionCatalog);
+      window.removeEventListener("storage", refreshFromStorage);
+    };
   }, []);
 
   useEffect(() => {
@@ -298,6 +328,7 @@ export default function Home() {
     postActionFlowRef.current = null;
     modalOriginRef.current = "classroom";
     setSeleccionado(null);
+    setCurriculumActionCatalog(readCurriculumActionCatalog());
 
     if (origin === "continuous") {
       continuousRunningRef.current = false;
@@ -333,6 +364,7 @@ export default function Home() {
     postActionFlowRef.current = null;
     modalOriginRef.current = "classroom";
     setSeleccionado(null);
+    setCurriculumActionCatalog(readCurriculumActionCatalog());
 
     if (
       continuousRunningRef.current
@@ -350,6 +382,55 @@ export default function Home() {
   const selectedStudentIsAbsent = seleccionado
     ? !canApplyStudentActionToday(attendance.day, seleccionado.id)
     : false;
+
+  const activeCurriculumSubjects = useMemo(
+    () => curriculum.state
+      ? getActiveCurriculumSubjects(curriculum.state, curriculumActionCatalog)
+      : [],
+    [curriculum.state, curriculumActionCatalog]
+  );
+
+  const visibleCurriculumSubjectId = activeCurriculumSubjectId
+    && activeCurriculumSubjects.some((subject) => subject.id === activeCurriculumSubjectId)
+    ? activeCurriculumSubjectId
+    : null;
+
+  function openCurriculumAssistant() {
+    setCurriculumActionCatalog(readCurriculumActionCatalog());
+    setConfiguracionAbierta(false);
+    setAsistenteCurricularAbierto(true);
+  }
+
+  function focusMainMenuButton() {
+    requestAnimationFrame(() => menuButtonReturnRef.current?.querySelector("button")?.focus());
+  }
+
+  function closeTeacherSettings() {
+    setConfiguracionAbierta(false);
+    focusMainMenuButton();
+  }
+
+  function closeCurriculumAssistant() {
+    setAsistenteCurricularAbierto(false);
+    focusMainMenuButton();
+  }
+
+  async function changeCurriculumTracking(enabled: boolean) {
+    if (!curriculum.state) {
+      if (enabled) openCurriculumAssistant();
+      return;
+    }
+    const result = setCurriculumTrackingEnabled(
+      curriculum.state,
+      enabled,
+      new Date().toISOString()
+    );
+    if (result.status === "applied") {
+      await curriculum.commitState(result.state);
+    } else if (enabled) {
+      openCurriculumAssistant();
+    }
+  }
 
   useEffect(() => {
     if (
@@ -371,7 +452,7 @@ export default function Home() {
   }, [attendance.isHydrated, seleccionado, selectedStudentIsAbsent, setSeleccionado]);
 
   return (
-    <main className="h-dvh overflow-y-auto bg-[#e8f3f6] text-slate-950">
+    <main className={`h-dvh ${curriculumOverlayOpen ? "overflow-hidden" : "overflow-y-auto"} bg-[#e8f3f6] text-slate-950`}>
       <div aria-hidden="true" className="pointer-events-none fixed inset-0 overflow-hidden">
         <div className="absolute inset-0 bg-[linear-gradient(145deg,#f7edcf_0%,#eaf6f7_42%,#c6e8ef_100%)]" />
         <div className="absolute -left-36 -top-36 h-[32rem] w-[32rem] rounded-full bg-amber-100/65 blur-3xl" />
@@ -379,24 +460,32 @@ export default function Home() {
         <div className="absolute inset-0 opacity-40 [background-image:radial-gradient(circle_at_center,rgba(255,255,255,.9)_0_1px,transparent_1.5px)] [background-size:42px_42px]" />
       </div>
 
-      <ClassroomContextNavigation
-        onOpenAttendance={() => setAsistenciaAbierta(true)}
-        onStartRandomSingle={() => beginRandomSelection(
-          getRandomSelectionModeForAccess("random")
-        )}
-        onStartRandomRound={() => beginRandomSelection(
-          getRandomSelectionModeForAccess("round")
-        )}
-      />
+      {!curriculumOverlayOpen && (
+        <ClassroomContextNavigation
+          onOpenAttendance={() => setAsistenciaAbierta(true)}
+          onStartRandomSingle={() => beginRandomSelection(
+            getRandomSelectionModeForAccess("random")
+          )}
+          onStartRandomRound={() => beginRandomSelection(
+            getRandomSelectionModeForAccess("round")
+          )}
+        />
+      )}
 
       <div className="relative mx-auto flex min-h-full w-full max-w-[1920px] flex-col px-4 pb-8 sm:px-6 lg:px-8">
         <header className="sticky top-0 z-40 flex shrink-0 items-center justify-between gap-4 border-b border-cyan-900/10 bg-[#edf7f8]/85 py-3 backdrop-blur-md sm:py-4">
           <Header />
           <div className="flex shrink-0 items-center gap-2 sm:gap-3">
             <SoundToggleButton soundEnabled={soundEnabled} onToggle={toggleSound} />
-            <MenuButton onClick={() => setMenuAbierto(true)} />
+            <div ref={menuButtonReturnRef}><MenuButton onClick={() => setMenuAbierto(true)} /></div>
           </div>
         </header>
+
+        <CurriculumSubjectTabs
+          subjects={activeCurriculumSubjects}
+          selectedSubjectId={visibleCurriculumSubjectId}
+          onSelect={setActiveCurriculumSubjectId}
+        />
 
         <section className="pt-4 sm:pt-5" aria-labelledby="classroom-students-title">
           <div className="mb-2 flex items-end justify-between gap-4 sm:mb-3">
@@ -434,10 +523,39 @@ export default function Home() {
         abierto={menuAbierto}
         onCerrar={() => setMenuAbierto(false)}
         onGestionarAlumnos={() => setGestorAlumnosAbierto(true)}
+        onOpenSettings={() => setConfiguracionAbierta(true)}
         guardianScale={guardianScale}
         onGuardianScaleChange={setGuardianScale}
         onGuardianScaleReset={resetGuardianScale}
       />
+
+      {configuracionAbierta && <TeacherSettingsPanel
+        key={`teacher-settings:${classroomId}`}
+        open={configuracionAbierta}
+        state={curriculum.state}
+        storageStatus={curriculum.readStatus}
+        isHydrated={curriculum.isHydrated}
+        isSaving={curriculum.isSaving}
+        message={curriculum.message}
+        onClose={closeTeacherSettings}
+        onTrackingChange={(enabled) => void changeCurriculumTracking(enabled)}
+        onOpenAssistant={openCurriculumAssistant}
+      />}
+
+      {asistenteCurricularAbierto && <CurriculumAssistant
+        key={`curriculum-assistant:${classroomId}`}
+        open={asistenteCurricularAbierto}
+        classroomId={classroomId}
+        state={curriculum.draftState}
+        actions={curriculumActionCatalog}
+        isSaving={curriculum.isSaving}
+        storageMessage={curriculum.message}
+        hasPendingSave={curriculum.hasPendingSave}
+        canRetryPendingSave={curriculum.canRetryPendingSave}
+        onClose={closeCurriculumAssistant}
+        onCommit={curriculum.commitState}
+        onRetryPendingSave={curriculum.retryPendingState}
+      />}
 
       <StudentManager
         abierto={gestorAlumnosAbierto}
@@ -457,25 +575,27 @@ export default function Home() {
         />
       )}
 
-      <RandomStudentSelector
-        noticeOpen={selectorAbierto}
-        students={alumnos}
-        presentStudentIds={presentStudentIds}
-        availableStudentIds={randomSelector.availableStudentIds}
-        state={randomSelector.state}
-        isHydrated={attendance.isHydrated && randomSelector.isHydrated}
-        isContinuousRunning={randomSelector.isContinuousRunning}
-        roundControlsVisible={shouldShowRoundControls}
-        soundEnabled={soundEnabled}
-        message={selectorMessage}
-        animation={selectionAnimation}
-        onCloseNotice={() => setSelectorAbierto(false)}
-        onContinueContinuous={() => beginRandomSelection("continuous")}
-        onStopContinuous={stopRandomRound}
-        onCloseContinuousRound={closeRandomRound}
-        onResetContinuous={resetRandomRound}
-        onAnimationComplete={completeRandomSelection}
-      />
+      {!curriculumOverlayOpen && (
+        <RandomStudentSelector
+          noticeOpen={selectorAbierto}
+          students={alumnos}
+          presentStudentIds={presentStudentIds}
+          availableStudentIds={randomSelector.availableStudentIds}
+          state={randomSelector.state}
+          isHydrated={attendance.isHydrated && randomSelector.isHydrated}
+          isContinuousRunning={randomSelector.isContinuousRunning}
+          roundControlsVisible={shouldShowRoundControls}
+          soundEnabled={soundEnabled}
+          message={selectorMessage}
+          animation={selectionAnimation}
+          onCloseNotice={() => setSelectorAbierto(false)}
+          onContinueContinuous={() => beginRandomSelection("continuous")}
+          onStopContinuous={stopRandomRound}
+          onCloseContinuousRound={closeRandomRound}
+          onResetContinuous={resetRandomRound}
+          onAnimationComplete={completeRandomSelection}
+        />
+      )}
 
       {seleccionado && (
         <StudentModal
@@ -493,4 +613,12 @@ export default function Home() {
       )}
     </main>
   );
+}
+
+function readCurriculumActionCatalog() {
+  try {
+    return getActionCatalog();
+  } catch {
+    return [];
+  }
 }

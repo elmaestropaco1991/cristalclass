@@ -16,6 +16,7 @@ const deterministicSuites = [
   ["app/services/attendanceDeterministicChecks.ts", "runAttendanceDeterministicChecks"],
   ["app/services/chestOpeningLifecycleDeterministicChecks.ts", "runChestOpeningLifecycleDeterministicChecks"],
   ["app/services/curriculumCatalogEditorDeterministicChecks.ts", "runCurriculumCatalogEditorDeterministicChecks"],
+  ["app/services/curriculumAssistantDeterministicChecks.ts", "runCurriculumAssistantDeterministicChecks"],
   ["app/services/curriculumMigrationDeterministicChecks.ts", "runCurriculumMigrationDeterministicChecks"],
   ["app/services/curriculumPackImportDeterministicChecks.ts", "runCurriculumPackImportDeterministicChecks"],
   ["app/services/curriculumStorageDeterministicChecks.ts", "runCurriculumStorageDeterministicChecks"],
@@ -59,6 +60,19 @@ function sourceFiles(directory) {
 }
 
 function repositoryIsolationChecks() {
+  const pageSource = fs.readFileSync(path.join(workspace, "app", "page.tsx"), "utf8");
+  const assistantSource = fs.readFileSync(
+    path.join(workspace, "app", "components", "CurriculumAssistant.tsx"),
+    "utf8"
+  );
+  const assistantHookSource = fs.readFileSync(
+    path.join(workspace, "app", "hooks", "useCurriculumAssistant.ts"),
+    "utf8"
+  );
+  const teacherSettingsSource = fs.readFileSync(
+    path.join(workspace, "app", "components", "TeacherSettingsPanel.tsx"),
+    "utf8"
+  );
   const appFiles = [
     path.join(workspace, "app", "page.tsx"),
     ...sourceFiles(path.join(workspace, "app", "components")),
@@ -88,6 +102,59 @@ function repositoryIsolationChecks() {
     {
       name: "repository isolation: coin runtime contains no generated dates or random identities",
       passed: newRuntimeFiles.every((file) => !nondeterminism.test(fs.readFileSync(file, "utf8"))),
+    },
+    {
+      name: "curriculum overlays use deterministic disjoint classroom keys",
+      passed: pageSource.includes('key={`teacher-settings:${classroomId}`}')
+        && pageSource.includes('key={`curriculum-assistant:${classroomId}`}'),
+    },
+    {
+      name: "curriculum dialogs are unmounted while closed",
+      passed: pageSource.includes("{configuracionAbierta && <TeacherSettingsPanel")
+        && pageSource.includes("{asistenteCurricularAbierto && <CurriculumAssistant"),
+    },
+    {
+      name: "curriculum overlays lock and declaratively restore classroom scrolling",
+      passed: pageSource.includes('curriculumOverlayOpen ? "overflow-hidden" : "overflow-y-auto"'),
+    },
+    {
+      name: "curriculum file selection can repeat the exact same file",
+      passed: assistantSource.includes('event.currentTarget.value = ""'),
+    },
+    {
+      name: "curriculum action storage is not read during render",
+      passed: pageSource.includes("useState<ReturnType<typeof getActionCatalog>>([])")
+        && pageSource.includes("refreshActionCatalog();")
+        && !pageSource.includes("useState(readCurriculumActionCatalog)"),
+    },
+    {
+      name: "curriculum storage listeners reuse the safely acquired adapter",
+      passed: !assistantHookSource.includes("window.localStorage")
+        && assistantHookSource.includes("event.storageArea === storage"),
+    },
+    {
+      name: "curriculum storage listeners react to a cross-tab clear",
+      passed: assistantHookSource.includes("event.key === null || event.key === storageKey")
+        && pageSource.includes('event.key === null || event.key === "cristalclass_actions"'),
+    },
+    {
+      name: "curriculum dialogs only apply initial focus when opening",
+      passed: /titleRef\.current\?\.focus\(\);\s*\}, \[open\]\);/.test(assistantSource)
+        && /titleRef\.current\?\.focus\(\);\s*\}, \[open\]\);/.test(teacherSettingsSource),
+    },
+    {
+      name: "failed known writes retain a draft without exposing it as an operational tab",
+      passed: assistantHookSource.includes("setPendingState(nextState)")
+        && assistantHookSource.includes("retryPendingState")
+        && assistantHookSource.includes("installReadResult(classroomId, latest, true)")
+        && pageSource.includes("state={curriculum.draftState}")
+        && pageSource.includes("getActiveCurriculumSubjects(curriculum.state, curriculumActionCatalog)"),
+    },
+    {
+      name: "unexpected curriculum persistence failures retain the in-memory candidate",
+      passed: /catch \{\s*if \(mountedRef\.current && currentClassroomIdRef\.current === classroomId\) \{\s*pendingStateRef\.current = nextState;\s*setPendingState\(nextState\);/.test(
+        assistantHookSource
+      ),
     },
   ];
 }
