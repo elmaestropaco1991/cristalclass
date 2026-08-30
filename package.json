@@ -6,7 +6,10 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "typecheck": "tsc --noEmit",
+    "check:deterministic": "node scripts/runDeterministicChecks.cjs",
+    "test": "npm run check:deterministic"
   },
   "dependencies": {
     "@dicebear/collection": "^9.4.2",
