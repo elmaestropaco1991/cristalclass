@@ -68,6 +68,14 @@ export function hydrateActionCatalog(value: unknown): Action[] {
     return [action];
   });
 
+  // New bundled proposals are appended without replacing any stored action.
+  // A matching stable id always keeps the teacher's edited title and settings.
+  actions.forEach((defaultAction) => {
+    if (ids.has(defaultAction.id)) return;
+    ids.add(defaultAction.id);
+    catalog.push(cloneAction(defaultAction));
+  });
+
   return catalog.length > 0 ? normalizeActionCatalog(catalog) : cloneDefaultCatalog();
 }
 
@@ -134,11 +142,15 @@ function hydrateOrbit(value: unknown): { orbit: { angle: number; variant: Action
 }
 
 function cloneDefaultCatalog(): Action[] {
-  return actions.map((action) => ({
+  return actions.map(cloneAction);
+}
+
+function cloneAction(action: Action): Action {
+  return {
     ...action,
     attitudinalCriterionLinks: action.attitudinalCriterionLinks.map((link) => ({ ...link })),
     ...(action.orbit ? { orbit: { ...action.orbit } } : {}),
-  }));
+  };
 }
 
 function hasOwn(value: StoredAction, key: keyof StoredAction): boolean {

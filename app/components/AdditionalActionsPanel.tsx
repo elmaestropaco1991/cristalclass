@@ -19,6 +19,7 @@ type Props = {
   student: Student;
   movements: readonly Movement[];
   catalog: readonly Action[];
+  operationalCatalog: readonly Action[];
   isApplyingAction: boolean;
   actionError: boolean;
   actionsDisabled: boolean;
@@ -32,6 +33,7 @@ export default function AdditionalActionsPanel({
   student,
   movements,
   catalog,
+  operationalCatalog,
   isApplyingAction,
   actionError,
   actionsDisabled,
@@ -44,7 +46,10 @@ export default function AdditionalActionsPanel({
   const [mode, setMode] = useState<AdditionalActionsPanelMode>("operational");
   const [configurationHasUnsavedChanges, setConfigurationHasUnsavedChanges] = useState(false);
   const [confirmConfigurationDiscard, setConfirmConfigurationDiscard] = useState(false);
-  const additionalActions = orderAdditionalActions(getAdditionalActions(catalog), movements);
+  const additionalActions = orderAdditionalActions(
+    getAdditionalActions(operationalCatalog),
+    movements
+  );
   const positiveActions = additionalActions.filter((action) => action.points > 0);
   const negativeActions = additionalActions.filter((action) => action.points < 0);
 

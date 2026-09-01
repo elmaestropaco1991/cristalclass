@@ -10,7 +10,7 @@ La jerarquía visible es `Asignatura → Competencia específica → Criterio �
 
 `CurriculumAssistantState` es el agregado persistente y la única fuente de verdad operativa de esta integración por clase, versionado con `schemaVersion: 1`. Su `CurriculumCatalogEditorState` conserva un único pack curricular; las modificaciones válidas se aplican mediante `curriculumCatalogEditorService`. No existe una segunda copia del pack dentro del auxiliar. El perfil no copia contenido curricular: `packId` es una referencia y `selectedSubjectIds` conserva exclusivamente las activaciones. `trackingEnabled` representa la pausa general y el `status` obligatorio del perfil se mantiene como estado derivado coherente. `ActionCurricularLink` es la única fuente de las relaciones con acciones.
 
-El almacenamiento curricular auditado anterior continúa reservado para sus flujos de migración y no se modifica durante una operación del asistente. El asistente consulta el tamaño de su clave `current` únicamente para el presupuesto combinado. Por tanto, preparar, importar, relacionar o activar en el asistente escribe una sola envoltura, no dos catálogos ni una falsa transacción multiclave.
+El almacenamiento curricular auditado anterior continúa reservado para sus flujos de migración y no se modifica durante una operación del asistente. El asistente consulta el tamaño de su clave `current` únicamente para el presupuesto combinado. Por tanto, preparar, importar, relacionar o activar en el asistente escribe una sola envoltura, no dos catálogos ni una falsa transacción multiclave. El perfil guarda además las reglas ordinarias explícitas: observable, acción contraria, asignatura y saber; no se reconstruyen por el título de una acción.
 
 El contrato auxiliar solo guarda estados que el catálogo v2 estricto no puede representar durante una preparación incompleta:
 
@@ -42,7 +42,17 @@ Un cambio estructural que dejaría inválida una asignatura activa devuelve `req
 
 No hay un segundo catálogo. La elegibilidad usa el catálogo de acciones existente y únicamente identidades explícitas: el `subject.id` curricular, su `legacySubjectId` declarado o `availableInAllSubjects`. Al crear manualmente una asignatura, el docente puede vincular explícitamente uno de los contextos académicos existentes; una asignatura sin esa vinculación recibe solo acciones globales. No se comparan textos ni códigos.
 
-Los enlaces indican elegibilidad futura. Guardan efecto positivo o contrario y los criterios ya elegidos, pero no aplican cristales, crean evidencias ni calculan notas.
+Los enlaces guardan efecto positivo o contrario, modo manual u ordinario y el subconjunto exacto de criterios afectado. No aplican cristales, crean evidencias ni calculan notas por sí solos.
+
+Las cinco propuestas incluidas para Lengua tienen identidad estable y título editable:
+
+- `Interrumpe mientras otra persona habla` y `No atiende durante una intervención` son negativas y permiten seguimiento ordinario.
+- `Participa respetando los turnos de palabra` y `Participa demostrando escucha activa` son positivas manuales.
+- `Ayuda a resolver un conflicto mediante el diálogo` es positiva y situacional.
+
+Las cuatro primeras resuelven solo el criterio `3.2.a` o `3.2.b` del curso mediante el saber de interacción oral `LCL.n.B.3.1`. La acción dialogada resuelve solo `10.2.a` o `10.2.b`. No se propaga una acción a todos los criterios vinculados con ese saber.
+
+La hidratación del catálogo de acciones es aditiva: añade propuestas incluidas que falten, pero una identidad ya guardada conserva el nombre, puntos, archivo y demás decisiones del docente. Archivar una propuesta impide que reaparezca operativamente.
 
 ## Persistencia, concurrencia y presupuesto
 
@@ -75,7 +85,9 @@ El motor de evaluación vive separado del asistente y se documenta en `docs/curr
 
 El asistente ofrece una entrada directa para los seis cursos de Lengua Castellana y Literatura de Educación Primaria en Andalucía. El docente selecciona el curso y se cargan las competencias, criterios, saberes y relaciones del Anexo II autenticado. La transcripción, la huella documental y su verificación se documentan en `docs/andalusian-language-curriculum.md`.
 
-La carga integrada utiliza el mismo analizador, vista previa e importador estricto que un archivo portable. Si ya existe un borrador, informa de la coincidencia o divergencia y nunca lo sobrescribe.
+La carga integrada utiliza el mismo analizador, vista previa e importador estricto que un archivo portable. Después aplica las cinco propuestas revisadas, activa Lengua y deja preparadas dos reglas ordinarias: respeto de turnos y atención durante intervenciones. Ambas parten de cero minutos mínimos; no existe un umbral temporal presentado como científico. Si ya existe un borrador, informa de la coincidencia o divergencia y nunca lo sobrescribe.
+
+La pestaña `Aula` muestra acciones generales y la pestaña `Lengua` muestra acciones propias de Lengua o globales. La pantalla de configuración continúa recibiendo el catálogo completo para que filtrar la vista operativa nunca borre acciones de otras asignaturas.
 
 ## Límites deliberados
 
@@ -83,4 +95,4 @@ La carga integrada utiliza el mismo analizador, vista previa e importador estric
 - Un borrador existente no se reemplaza por una importación divergente; solo se reconoce de forma idempotente la misma importación fuente.
 - El flujo de creación/edición de acciones actual vive dentro de la ficha operativa del alumno y no puede abrirse desde el asistente sin anidar modales y duplicar estado. El asistente relaciona el catálogo existente; la creación sigue en su flujo actual.
 - No hay versión activa y borrador estructural simultáneos. Los cambios invalidantes exigen desactivar explícitamente la asignatura.
-- Las pestañas activas seleccionan contexto visual; no registran todavía evidencias.
+- Las pestañas activas seleccionan el contexto y filtran acciones; no registran todavía evidencias.

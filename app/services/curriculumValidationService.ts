@@ -376,6 +376,51 @@ function validateCurriculumDataInternal(
         ));
       }
     });
+    profile.ordinaryTracking.rules.forEach((rule, ruleIndex) => {
+      const rulePath = `profiles[${profileIndex}].ordinaryTracking.rules[${ruleIndex}]`;
+      if (
+        typeof rule.id !== "string"
+        || !rule.id.trim()
+        || typeof rule.enabled !== "boolean"
+        || typeof rule.observableActionId !== "string"
+        || !rule.observableActionId.trim()
+        || !Array.isArray(rule.contraryActionIds)
+        || rule.contraryActionIds.length === 0
+        || rule.contraryActionIds.some((id) => typeof id !== "string" || !id.trim())
+        || new Set(rule.contraryActionIds).size !== rule.contraryActionIds.length
+        || rule.contraryActionIds.includes(rule.observableActionId)
+      ) {
+        issues.push(issue(
+          "invalid-state",
+          rulePath,
+          "Ordinary tracking rule contract is invalid."
+        ));
+        return;
+      }
+      const subject = packSubjects?.get(rule.subjectId);
+      if (!subject) {
+        issues.push(issue(
+          "missing-subject-reference",
+          `${rulePath}.subjectId`,
+          "Ordinary tracking subject does not exist in the profile pack."
+        ));
+      } else if (!subject.basicKnowledge.has(rule.basicKnowledgeId)) {
+        issues.push(issue(
+          "missing-basic-knowledge-reference",
+          `${rulePath}.basicKnowledgeId`,
+          "Ordinary tracking basic knowledge does not exist in the selected subject."
+        ));
+      }
+      [rule.observableActionId, ...rule.contraryActionIds].forEach((actionId) => {
+        if (!actionIds.has(actionId)) {
+          issues.push(issue(
+            "missing-action-reference",
+            rulePath,
+            `Ordinary tracking action ${actionId} does not exist.`
+          ));
+        }
+      });
+    });
   });
 
   if (data.module.status === "active") {

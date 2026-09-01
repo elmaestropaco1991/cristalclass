@@ -41,6 +41,15 @@ cristalclass_curriculum_evaluation_v1:{classroomId codificado}
 
 La envoltura contiene versión, clase, revisión optimista, estado, fecha de escritura y checksum determinista. Las lecturas no reparan ni reescriben valores. Una revisión obsoleta, un checksum divergente o un estado inválido bloquean la escritura. El límite actual es de 1.000.000 de unidades de código.
 
+## Reglas de Lengua ya preparadas
+
+Al activar el catálogo oficial de Lengua, el perfil guarda dos reglas ordinarias sin mínimo temporal inventado:
+
+- respeto de turnos: positiva `Participa respetando los turnos de palabra`, contraria `Interrumpe mientras otra persona habla`;
+- atención durante intervenciones: positiva `Participa demostrando escucha activa`, contraria `No atiende durante una intervención`.
+
+Las relaciones curriculares se limitan al criterio `3.2` exacto del curso y mantienen cobertura parcial. La acción situacional de resolución dialogada se relaciona con `10.2`, pero no genera oportunidades por ausencia de conflictos.
+
 ## Pendiente de integración
 
-El siguiente bloque deberá definir con la interfaz cuándo comienza y termina una sesión real, crear las reglas oficiales de Lengua y registrar snapshots curriculares al aplicar una acción. Hasta entonces, este motor permanece aislado y no altera cristales, monedas, cofres, movimientos ni asistencia.
+El siguiente bloque deberá definir con la interfaz cuándo comienza y termina una sesión real y registrar snapshots curriculares al aplicar una acción. Hasta entonces, las reglas quedan preparadas pero el motor permanece aislado y no altera cristales, monedas, cofres, movimientos ni asistencia.

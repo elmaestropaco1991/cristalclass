@@ -17,9 +17,11 @@ import {
   shouldCompleteActionAfterFeedback,
 } from "../services/actionFeedbackService";
 import { getActionCatalog } from "../services/actionService";
+import { getVisibleActionsForSubject } from "../services/actionSubjectService";
 import type { Action, ActionType } from "../types/action";
 import type { Movement } from "../types/movement";
 import type { Student } from "../types/student";
+import type { SubjectId } from "../types/subject";
 import type { ItemCategory } from "../../domain";
 import AdditionalActionsPanel from "./AdditionalActionsPanel";
 import ActionConfirmationFeedback from "./ActionConfirmationFeedback";
@@ -42,13 +44,14 @@ type Props = {
   onSoundEnabledChange: (enabled: boolean) => void;
   actionsDisabled: boolean;
   studentIsAbsent: boolean;
+  activeSubjectId: SubjectId;
   onCerrar: () => void;
   onAccion: (actionId: ActionType) => Promise<boolean>;
   onActionAppliedSuccessfully: () => void;
   onStudentUpdated: (student: Student) => void;
 };
 
-export default function StudentModal({ alumno, movements, soundEnabled, onSoundEnabledChange, actionsDisabled, studentIsAbsent, onCerrar, onAccion, onActionAppliedSuccessfully, onStudentUpdated }: Props) {
+export default function StudentModal({ alumno, movements, soundEnabled, onSoundEnabledChange, actionsDisabled, studentIsAbsent, activeSubjectId, onCerrar, onAccion, onActionAppliedSuccessfully, onStudentUpdated }: Props) {
   const [additionalActionsOpen, setAdditionalActionsOpen] = useState(false);
   const [coleccionAbierta, setColeccionAbierta] = useState(false);
   const [cofreAbierto, setCofreAbierto] = useState(false);
@@ -61,6 +64,7 @@ export default function StudentModal({ alumno, movements, soundEnabled, onSoundE
   const [actionFeedbackKind, setActionFeedbackKind] =
     useState<"positive" | "negative" | null>(null);
   const [actionCatalog, setActionCatalog] = useState<Action[]>(() => getActionCatalog());
+  const visibleActionCatalog = getVisibleActionsForSubject(actionCatalog, activeSubjectId);
   const actionGuardRef = useRef(createActionApplicationGuard());
   const pendingChestCount = alumno.chests.filter(
     (chest) => chest.status === "pending" || chest.status === "closed"
@@ -228,7 +232,7 @@ export default function StudentModal({ alumno, movements, soundEnabled, onSoundE
                 : ""
           }`}>
             <AvatarArena student={alumno} />
-            <ActionOrbit onAccion={handleAction} disabled={isApplyingAction || actionsDisabled} actions={actionCatalog} />
+            <ActionOrbit onAccion={handleAction} disabled={isApplyingAction || actionsDisabled} actions={visibleActionCatalog} />
           </div>
         </div>
 
@@ -268,6 +272,7 @@ export default function StudentModal({ alumno, movements, soundEnabled, onSoundE
             student={alumno}
             movements={movements}
             catalog={actionCatalog}
+            operationalCatalog={visibleActionCatalog}
             isApplyingAction={isApplyingAction}
             actionError={actionError}
             actionsDisabled={actionsDisabled}

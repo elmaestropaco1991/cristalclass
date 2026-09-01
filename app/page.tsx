@@ -46,7 +46,9 @@ import {
   shouldStartNextRandomSelection,
 } from "./services/randomStudentSelectorService";
 import { prepareRandomSelectorAudio } from "./services/randomStudentSelectorSoundService";
+import { isSubjectId } from "./services/subjectCatalogService";
 import type { ActionType } from "./types/action";
+import { GENERAL_SUBJECT_ID } from "./types/subject";
 import type {
   RandomSelectionActionFlow,
   RandomStudentSelectionMode,
@@ -394,6 +396,13 @@ export default function Home() {
     && activeCurriculumSubjects.some((subject) => subject.id === activeCurriculumSubjectId)
     ? activeCurriculumSubjectId
     : null;
+  const activeActionSubjectId = (() => {
+    if (!visibleCurriculumSubjectId) return GENERAL_SUBJECT_ID;
+    const legacySubjectId = activeCurriculumSubjects.find(
+      (subject) => subject.id === visibleCurriculumSubjectId
+    )?.legacySubjectId;
+    return isSubjectId(legacySubjectId) ? legacySubjectId : GENERAL_SUBJECT_ID;
+  })();
 
   function openCurriculumAssistant() {
     setCurriculumActionCatalog(readCurriculumActionCatalog());
@@ -605,6 +614,7 @@ export default function Home() {
           onSoundEnabledChange={setSoundEnabled}
           actionsDisabled={!attendance.isHydrated || selectedStudentIsAbsent}
           studentIsAbsent={selectedStudentIsAbsent}
+          activeSubjectId={activeActionSubjectId}
           onCerrar={closeStudentModal}
           onAccion={ejecutarAccion}
           onActionAppliedSuccessfully={handleActionAppliedSuccessfully}

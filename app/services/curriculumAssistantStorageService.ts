@@ -453,7 +453,8 @@ function validateAssistantStateShape(
       || !Number.isFinite(state.profile.ordinaryTracking.minimumSessionDurationMinutes)
       || state.profile.ordinaryTracking.minimumSessionDurationMinutes < 0
       || !Array.isArray(state.profile.ordinaryTracking.rules)
-      || state.profile.ordinaryTracking.rules.length > 0
+      || state.profile.ordinaryTracking.rules.length
+        > CURRICULUM_ASSISTANT_STORAGE_BUDGET.maxActionLinks
       || !Array.isArray(state.profile.selectedSubjectIds)
       || state.profile.selectedSubjectIds.some((id) => typeof id !== "string" || !id.trim())
       || new Set(state.profile.selectedSubjectIds).size !== state.profile.selectedSubjectIds.length
@@ -468,6 +469,32 @@ function validateAssistantStateShape(
         && (state.profile.status !== "active" || state.profile.selectedSubjectIds.length === 0))
       || (!state.trackingEnabled && state.profile.status !== "configured")
     ) return "La activación curricular no coincide con la preparación guardada.";
+    const ordinaryRuleIds = new Set<string>();
+    for (const rule of state.profile.ordinaryTracking.rules) {
+      if (
+        !isRecord(rule)
+        || !hasExactKeys(rule, [
+          "id", "subjectId", "basicKnowledgeId", "observableActionId",
+          "contraryActionIds", "enabled",
+        ])
+        || typeof rule.id !== "string"
+        || !rule.id.trim()
+        || ordinaryRuleIds.has(rule.id)
+        || typeof rule.subjectId !== "string"
+        || !rule.subjectId.trim()
+        || typeof rule.basicKnowledgeId !== "string"
+        || !rule.basicKnowledgeId.trim()
+        || typeof rule.observableActionId !== "string"
+        || !rule.observableActionId.trim()
+        || !Array.isArray(rule.contraryActionIds)
+        || rule.contraryActionIds.length === 0
+        || rule.contraryActionIds.some((id) => typeof id !== "string" || !id.trim())
+        || new Set(rule.contraryActionIds).size !== rule.contraryActionIds.length
+        || rule.contraryActionIds.includes(rule.observableActionId)
+        || typeof rule.enabled !== "boolean"
+      ) return "El perfil contiene reglas de observación ordinaria inválidas.";
+      ordinaryRuleIds.add(rule.id);
+    }
   }
   const pendingIds = new Set<string>();
   for (const pending of state.pendingBasicKnowledge) {
@@ -554,7 +581,7 @@ function validateAssistantStateShape(
       || link.resolvedCriterionIds.some((id) => typeof id !== "string" || !id.trim())
       || new Set(link.resolvedCriterionIds).size !== link.resolvedCriterionIds.length
       || (link.effect !== "positive" && link.effect !== "contrary")
-      || link.recordingMode !== "manual"
+      || (link.recordingMode !== "manual" && link.recordingMode !== "ordinary")
       || typeof link.enabled !== "boolean"
       || typeof link.createdAt !== "string"
       || typeof link.updatedAt !== "string"
@@ -581,7 +608,13 @@ function validateAssistantStateShape(
       packs: [state.catalog.pack],
       profiles: [state.profile],
       actionLinks: state.actionLinks,
-    }, state.actionLinks.map((link) => link.actionId));
+    }, [
+      ...state.actionLinks.map((link) => link.actionId),
+      ...state.profile.ordinaryTracking.rules.flatMap((rule) => [
+        rule.observableActionId,
+        ...rule.contraryActionIds,
+      ]),
+    ]);
     if (!aggregateValidation.valid) {
       return "El borrador contiene referencias curriculares rotas o cruzadas.";
     }

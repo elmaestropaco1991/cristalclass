@@ -50,6 +50,7 @@ import {
   getAndalusianLanguageCurriculumPack,
   type AndalusianLanguageCurriculumCourse,
 } from "../services/andalusianLanguageCurriculumService";
+import { applyAndalusianLanguageCurriculumDefaults } from "../services/andalusianLanguageCurriculumDefaultsService";
 import { getOrderedSubjectCatalog } from "../services/subjectCatalogService";
 import ActionIcon from "./ActionIcon";
 
@@ -246,6 +247,7 @@ export default function CurriculumAssistant({
             <StartStep
               classroomId={classroomId}
               state={state}
+              actionCatalog={actions}
               analysis={importAnalysis}
               isSaving={isSaving}
               onAnalysis={setImportAnalysis}
@@ -320,6 +322,7 @@ function Progress({ step }: { step: 1 | 2 | 3 }) {
 function StartStep({
   classroomId,
   state,
+  actionCatalog,
   analysis,
   isSaving,
   onAnalysis,
@@ -330,6 +333,7 @@ function StartStep({
 }: {
   classroomId: string;
   state: CurriculumAssistantState | null;
+  actionCatalog: readonly Action[];
   analysis: ImportAnalysis | null;
   isSaving: boolean;
   onAnalysis: (analysis: ImportAnalysis | null) => void;
@@ -434,15 +438,21 @@ function StartStep({
       if (!preview.canApply) {
         throw new Error("El catálogo oficial necesita resolver un bloqueo antes de incorporarse.");
       }
-      const next = confirmCurriculumAssistantImport(classroomId, preview, occurredAt);
+      const imported = confirmCurriculumAssistantImport(classroomId, preview, occurredAt);
       if (state) {
-        if (classifyCurriculumAssistantImportRepeat(state, next) === "idempotent") {
+        if (classifyCurriculumAssistantImportRepeat(state, imported) === "idempotent") {
           onMessage("Este curso de Lengua ya está incorporado. El borrador actual se conserva.", false);
         } else {
           onMessage("Ya existe otro borrador. No se ha sobrescrito con el catálogo oficial.", true);
         }
         return;
       }
+      const next = applyAndalusianLanguageCurriculumDefaults(
+        imported,
+        officialCourse,
+        actionCatalog,
+        occurredAt
+      );
       const committed = await onCommit(next);
       if (!committed) {
         onMessage("El catálogo sigue preparado, pero no se pudo confirmar su guardado.", true);
@@ -467,7 +477,7 @@ function StartStep({
         )}
         <section className="rounded-3xl border-2 border-cyan-700 bg-cyan-50 p-5 shadow-sm">
           <div className="flex items-center gap-3"><span aria-hidden="true" className="text-3xl">🏛️</span><h4 className="text-2xl font-black text-[#173d70]">Andalucía · Lengua oficial</h4></div>
-          <p className="mt-2 font-semibold text-slate-600">Incluye las 10 competencias, los 22 criterios del curso, todos los saberes del ciclo y sus relaciones oficiales.</p>
+          <p className="mt-2 font-semibold text-slate-600">Incluye las 10 competencias, los 22 criterios del curso, todos los saberes del ciclo y las propuestas de observación ya activas.</p>
           <label className="mt-4 block text-lg font-black text-[#173d70]">Curso
             <select value={officialCourse} disabled={isSaving || state !== null} onChange={(event) => setOfficialCourse(event.target.value === "" ? "" : Number(event.target.value) as AndalusianLanguageCurriculumCourse)} className="mt-2 w-full rounded-xl border border-cyan-800/30 bg-white px-4 py-3 text-lg font-bold outline-none focus:border-cyan-600 focus:ring-4 focus:ring-cyan-200 disabled:opacity-55">
               <option value="">Selecciona el curso</option>
@@ -475,7 +485,7 @@ function StartStep({
             </select>
           </label>
           <button type="button" onClick={() => void loadOfficialLanguagePack()} disabled={officialCourse === "" || isSaving || state !== null} className="mt-4 min-h-12 w-full rounded-xl bg-[#173d70] px-4 font-black text-white disabled:cursor-not-allowed disabled:opacity-45 focus-visible:outline-4 focus-visible:outline-cyan-400">
-            Cargar Lengua completa
+            Activar Lengua completa
           </button>
           <p className="mt-3 text-sm font-semibold text-cyan-900">Fuente verificada: Orden de 30 de mayo de 2023 · BOJA 104 · CVE 00284747.</p>
         </section>

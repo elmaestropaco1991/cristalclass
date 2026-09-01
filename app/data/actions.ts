@@ -1,5 +1,6 @@
 import type { Action } from "../types/action";
 import { GENERAL_SUBJECT_ID } from "../types/subject";
+import { LANGUAGE_ACTIONS } from "./languageActions";
 
 const GENERAL_ACTION_CONTEXT = {
   subjectId: GENERAL_SUBJECT_ID,
@@ -106,4 +107,5 @@ export const actions: Action[] = [
       variant: "severe",
     },
   },
+  ...LANGUAGE_ACTIONS,
 ];
