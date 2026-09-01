@@ -6,6 +6,7 @@ import Header from "./components/Header";
 import AttendancePanel from "./components/AttendancePanel";
 import ClassroomContextNavigation from "./components/ClassroomContextNavigation";
 import CurriculumAssistant from "./components/CurriculumAssistant";
+import CurriculumEvaluationPanel from "./components/CurriculumEvaluationPanel";
 import CurriculumSubjectTabs from "./components/CurriculumSubjectTabs";
 import MenuButton from "./components/MenuButton";
 import RandomStudentSelector, {
@@ -25,6 +26,7 @@ import { useRandomStudentSelector } from "./hooks/useRandomStudentSelector";
 import { useSoundPreference } from "./hooks/useSoundPreference";
 import { useClassroomGuardianScale } from "./hooks/useClassroomGuardianScale";
 import { useCurriculumAssistant } from "./hooks/useCurriculumAssistant";
+import { useCurriculumEvaluation } from "./hooks/useCurriculumEvaluation";
 import { createLegacyApplyStudentAction } from "./services/legacyApplyStudentAction";
 import { preloadActionSounds } from "./services/actionSoundService";
 import { getActionCatalog } from "./services/actionService";
@@ -34,6 +36,9 @@ import {
   getActiveCurriculumSubjects,
   setCurriculumTrackingEnabled,
 } from "./services/curriculumAssistantService";
+import {
+  createCurriculumEvaluationRuleSnapshots,
+} from "./services/curriculumEvaluationRuntimeService";
 import {
   canApplyStudentActionToday,
   executeStudentActionIfPresent,
@@ -69,6 +74,7 @@ export default function Home() {
   const { soundEnabled, setSoundEnabled, toggleSound } = useSoundPreference();
   const classroomId = resolveClassroomId(alumnos);
   const curriculum = useCurriculumAssistant(classroomId);
+  const curriculumEvaluation = useCurriculumEvaluation(classroomId);
   const [attendanceTimeZone] = useState(getUserTimeZone);
   const [attendanceLocalDate, setAttendanceLocalDate] = useState(() =>
     getLocalDateKey(new Date(), attendanceTimeZone)
@@ -104,9 +110,12 @@ export default function Home() {
   const [menuAbierto, setMenuAbierto] = useState(false);
   const [configuracionAbierta, setConfiguracionAbierta] = useState(false);
   const [asistenteCurricularAbierto, setAsistenteCurricularAbierto] = useState(false);
+  const [evaluacionCurricularAbierta, setEvaluacionCurricularAbierta] = useState(false);
   const [curriculumActionCatalog, setCurriculumActionCatalog] = useState<ReturnType<typeof getActionCatalog>>([]);
   const [activeCurriculumSubjectId, setActiveCurriculumSubjectId] = useState<string | null>(null);
-  const curriculumOverlayOpen = configuracionAbierta || asistenteCurricularAbierto;
+  const curriculumOverlayOpen = configuracionAbierta
+    || asistenteCurricularAbierto
+    || evaluacionCurricularAbierta;
   const menuButtonReturnRef = useRef<HTMLDivElement>(null);
   const [gestorAlumnosAbierto, setGestorAlumnosAbierto] = useState(false);
   const [asistenciaAbierta, setAsistenciaAbierta] = useState(false);
@@ -174,6 +183,8 @@ export default function Home() {
     if (!seleccionado || !attendance.isHydrated) return false;
 
     try {
+      const occurredAt = new Date().toISOString();
+      const actionSnapshot = getActionCatalog().find((action) => action.id === actionId);
       const guardedResult = await executeStudentActionIfPresent(
         attendance.day,
         seleccionado.id,
@@ -185,7 +196,7 @@ export default function Home() {
             id: seleccionado.id,
             type: "student",
           },
-          issuedAt: new Date().toISOString(),
+          issuedAt: occurredAt,
           idempotencyKey: crypto.randomUUID(),
           payload: { actionId },
           metadata: {
@@ -196,6 +207,15 @@ export default function Home() {
 
       const committed = guardedResult.status === "executed"
         && guardedResult.value.status === "committed";
+      if (committed && actionSnapshot) {
+        curriculumEvaluation.recordAction({
+          action: actionSnapshot,
+          studentId: seleccionado.id,
+          presentStudentIds,
+          occurredAt,
+          observationId: crypto.randomUUID(),
+        });
+      }
       postActionFlowRef.current = resolveRandomSelectionActionFlow(
         modalOriginRef.current,
         committed,
@@ -392,9 +412,12 @@ export default function Home() {
     [curriculum.state, curriculumActionCatalog]
   );
 
-  const visibleCurriculumSubjectId = activeCurriculumSubjectId
-    && activeCurriculumSubjects.some((subject) => subject.id === activeCurriculumSubjectId)
-    ? activeCurriculumSubjectId
+  const preferredCurriculumSubjectId = activeCurriculumSubjectId
+    ?? curriculumEvaluation.openSession?.subjectId
+    ?? null;
+  const visibleCurriculumSubjectId = preferredCurriculumSubjectId
+    && activeCurriculumSubjects.some((subject) => subject.id === preferredCurriculumSubjectId)
+    ? preferredCurriculumSubjectId
     : null;
   const activeActionSubjectId = (() => {
     if (!visibleCurriculumSubjectId) return GENERAL_SUBJECT_ID;
@@ -403,6 +426,27 @@ export default function Home() {
     )?.legacySubjectId;
     return isSubjectId(legacySubjectId) ? legacySubjectId : GENERAL_SUBJECT_ID;
   })();
+
+  function selectCurriculumSubject(subjectId: string | null) {
+    if (curriculumEvaluation.isHydrated) {
+      const rules = subjectId && curriculum.state
+        ? createCurriculumEvaluationRuleSnapshots(
+            curriculum.state,
+            subjectId,
+            curriculumActionCatalog
+          )
+        : [];
+      curriculumEvaluation.transitionSubject({
+        subjectId,
+        localDate: attendanceLocalDate,
+        presentStudentIds,
+        rules,
+        occurredAt: new Date().toISOString(),
+        sessionId: crypto.randomUUID(),
+      });
+    }
+    setActiveCurriculumSubjectId(subjectId);
+  }
 
   function openCurriculumAssistant() {
     setCurriculumActionCatalog(readCurriculumActionCatalog());
@@ -493,7 +537,7 @@ export default function Home() {
         <CurriculumSubjectTabs
           subjects={activeCurriculumSubjects}
           selectedSubjectId={visibleCurriculumSubjectId}
-          onSelect={setActiveCurriculumSubjectId}
+          onSelect={selectCurriculumSubject}
         />
 
         <section className="pt-4 sm:pt-5" aria-labelledby="classroom-students-title">
@@ -532,6 +576,7 @@ export default function Home() {
         abierto={menuAbierto}
         onCerrar={() => setMenuAbierto(false)}
         onGestionarAlumnos={() => setGestorAlumnosAbierto(true)}
+        onOpenEvaluation={() => setEvaluacionCurricularAbierta(true)}
         onOpenSettings={() => setConfiguracionAbierta(true)}
         guardianScale={guardianScale}
         onGuardianScaleChange={setGuardianScale}
@@ -564,6 +609,15 @@ export default function Home() {
         onClose={closeCurriculumAssistant}
         onCommit={curriculum.commitState}
         onRetryPendingSave={curriculum.retryPendingState}
+      />}
+
+      {evaluacionCurricularAbierta && <CurriculumEvaluationPanel
+        students={alumnos}
+        curriculumState={curriculum.state}
+        evaluationState={curriculumEvaluation.state}
+        openSession={curriculumEvaluation.openSession}
+        message={curriculumEvaluation.message}
+        onClose={() => setEvaluacionCurricularAbierta(false)}
       />}
 
       <StudentManager

@@ -2,9 +2,7 @@
 
 ## Alcance de este bloque
 
-Este módulo añade el contrato, el cálculo y la persistencia auditada de la evaluación curricular. Todavía no abre ni cierra sesiones desde la interfaz y no convierte los movimientos legacy en evidencias, porque esos movimientos no conservan la asignatura ni la sesión en la que ocurrieron.
-
-La integración posterior deberá crear explícitamente una sesión real de asignatura y entregarla al motor. Conectar directamente el historial antiguo produciría asociaciones curriculares inventadas.
+El módulo incluye contrato, cálculo, persistencia auditada, sesiones automáticas y una vista de evaluación. No convierte los movimientos legacy en evidencias, porque esos movimientos no conservan la asignatura ni la sesión en la que ocurrieron. Conectar retrospectivamente ese historial produciría asociaciones curriculares inventadas.
 
 ## Principios cerrados
 
@@ -41,6 +39,20 @@ cristalclass_curriculum_evaluation_v1:{classroomId codificado}
 
 La envoltura contiene versión, clase, revisión optimista, estado, fecha de escritura y checksum determinista. Las lecturas no reparan ni reescriben valores. Una revisión obsoleta, un checksum divergente o un estado inválido bloquean la escritura. El límite actual es de 1.000.000 de unidades de código.
 
+La sesión en curso se guarda por separado bajo `cristalclass_curriculum_open_session_v1:{classroomId}`. Incluye asignatura, alumnado presente, reglas, acciones y una huella de integridad. Esto permite recuperar una clase abierta tras recargar sin mezclarla con sesiones ya cerradas.
+
+## Flujo diario conectado
+
+- Seleccionar una asignatura con reglas ordinarias abre silenciosamente una sesión.
+- Cambiar de asignatura o volver a `Aula` cierra la sesión anterior.
+- Una acción cotidiana se aplica primero a cristales, monedas y movimientos. Si se confirma, su evidencia curricular se añade a la sesión sin preguntas adicionales.
+- Las acciones no relacionadas no generan evidencia.
+- Una pestaña abierta y cerrada en el mismo instante se descarta; no fabrica una oportunidad.
+- Una sesión en curso no entra en el cálculo hasta cerrarse.
+- `Menú → Evaluación` muestra las notas propuestas por alumno y asignatura.
+
+La vista conserva siempre las expresiones `nota propuesta` y `cobertura parcial`, muestra el número real de sesiones e incidencias y reproduce los avisos metodológicos. Desde la primera sesión válida existe una cifra; no se oculta por un umbral temporal inventado.
+
 ## Reglas ordinarias ya preparadas
 
 Al preparar el curso oficial, el perfil activa todas las áreas aplicables. Lengua guarda dos reglas ordinarias sin mínimo temporal inventado:
@@ -54,6 +66,6 @@ También se prepara una regla ordinaria revisada en Matemáticas, otra en Educac
 
 Conocimiento del Medio, Educación Artística y Valores incluyen relaciones manuales para actividades o situaciones reales. No crean una nota por ausencia de pulsaciones, porque una sesión puede no haber ofrecido ninguna oportunidad de experimentar, colaborar, debatir o compartir una producción.
 
-## Pendiente de integración
+## Límites actuales
 
-El siguiente bloque deberá definir con la interfaz cuándo comienza y termina una sesión real y registrar snapshots curriculares al aplicar una acción. Hasta entonces, las reglas quedan preparadas pero el motor permanece aislado y no altera cristales, monedas, cofres, movimientos ni asistencia.
+Las relaciones manuales de actividades contextuales todavía no calculan una nota propia: para ello será necesario definir de forma explícita cuándo hubo una oportunidad de experimento, producción artística, debate o proyecto. El registro ordinario ya conectado sigue sin alterar el resultado de cristales, monedas, cofres, movimientos ni asistencia si la persistencia curricular falla.

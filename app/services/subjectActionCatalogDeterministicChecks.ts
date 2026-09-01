@@ -41,13 +41,19 @@ export async function runSubjectActionCatalogDeterministicChecks(): Promise<
     title: "Acción general",
     points: 1,
   })[0];
+  const artAction = createAction([], {
+    id: "art-action",
+    title: "Acción de Plástica",
+    points: 1,
+    subjectId: SUBJECT_IDS.ART_EDUCATION,
+  })[0];
   const globalAction = createAction([], {
     id: "global-action",
     title: "Acción global",
     points: 1,
     availableInAllSubjects: true,
   })[0];
-  const scopedCatalog = [musicAction, generalAction, globalAction, globalAction];
+  const scopedCatalog = [musicAction, artAction, generalAction, globalAction, globalAction];
   let positiveTrackingRejected = false;
   let neutralTrackingRejected = false;
 
@@ -97,6 +103,13 @@ export async function runSubjectActionCatalogDeterministicChecks(): Promise<
         .some((action) => action.id === musicAction.id)
       && !getVisibleActionsForSubject(scopedCatalog, SUBJECT_IDS.LANGUAGE)
         .some((action) => action.id === musicAction.id)),
+    check("the official Artistic context shows Music and Plástica actions together", () =>
+      getVisibleActionsForSubject(scopedCatalog, SUBJECT_IDS.MUSIC)
+        .some((action) => action.id === artAction.id)
+      && getVisibleActionsForSubject(scopedCatalog, SUBJECT_IDS.ART_EDUCATION)
+        .some((action) => action.id === musicAction.id)
+      && !getVisibleActionsForSubject(scopedCatalog, SUBJECT_IDS.LANGUAGE)
+        .some((action) => action.id === artAction.id)),
     check("General actions do not appear in Music by default", () =>
       !getVisibleActionsForSubject(scopedCatalog, SUBJECT_IDS.MUSIC)
         .some((action) => action.id === generalAction.id)),

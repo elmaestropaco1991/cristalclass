@@ -2,6 +2,7 @@ type Props = {
   abierto: boolean;
   onCerrar: () => void;
   onGestionarAlumnos: () => void;
+  onOpenEvaluation: () => void;
   onOpenSettings: () => void;
   guardianScale: number;
   onGuardianScaleChange: (guardianScale: number) => void;
@@ -12,6 +13,7 @@ export default function SideMenu({
   abierto,
   onCerrar,
   onGestionarAlumnos,
+  onOpenEvaluation,
   onOpenSettings,
   guardianScale,
   onGuardianScaleChange,
@@ -64,9 +66,14 @@ export default function SideMenu({
             🎁 Recompensas
           </button>
 
-          {/* TODO: Implementar el panel de estadísticas. */}
-          <button className="text-left p-4 rounded-xl hover:bg-slate-100 text-lg">
-            📊 Estadísticas
+          <button
+            onClick={() => {
+              onCerrar();
+              onOpenEvaluation();
+            }}
+            className="text-left p-4 rounded-xl hover:bg-slate-100 text-lg font-semibold focus-visible:outline-4 focus-visible:outline-cyan-400"
+          >
+            📊 Evaluación
           </button>
 
           <button

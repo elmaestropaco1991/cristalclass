@@ -3,7 +3,7 @@ import type {
   ActionSubjectContext,
   AttitudinalCriterionReference,
 } from "../types/action";
-import { GENERAL_SUBJECT_ID, type SubjectId } from "../types/subject";
+import { GENERAL_SUBJECT_ID, SUBJECT_IDS, type SubjectId } from "../types/subject";
 import { isSubjectId } from "./subjectCatalogService";
 
 /** Legacy or unknown contexts degrade safely to General and never become global implicitly. */
@@ -76,7 +76,16 @@ export function getVisibleActionsForSubject(
     if (action.archived || visibleIds.has(action.id)) return false;
 
     const context = normalizeActionContext(action);
-    const visible = context.subjectId === activeSubjectId || context.availableInAllSubjects;
+    const artisticContext = (
+      activeSubjectId === SUBJECT_IDS.MUSIC
+      || activeSubjectId === SUBJECT_IDS.ART_EDUCATION
+    ) && (
+      context.subjectId === SUBJECT_IDS.MUSIC
+      || context.subjectId === SUBJECT_IDS.ART_EDUCATION
+    );
+    const visible = context.subjectId === activeSubjectId
+      || artisticContext
+      || context.availableInAllSubjects;
 
     if (visible) visibleIds.add(action.id);
     return visible;
