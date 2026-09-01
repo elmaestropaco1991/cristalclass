@@ -1,4 +1,5 @@
 import type { Action } from "../types/action";
+import { SUBJECT_IDS } from "../types/subject";
 import {
   CURRICULUM_ASSISTANT_SCHEMA_VERSION,
   type CurriculumAssistantLegacyImport,
@@ -1038,6 +1039,9 @@ export function getEligibleActionsForCurriculumSubject(
   const explicitSubjectIds = new Set([
     subject.id,
     ...(subject.legacySubjectId ? [subject.legacySubjectId] : []),
+    ...(subject.externalCode === "EAR"
+      ? [SUBJECT_IDS.ART_EDUCATION, SUBJECT_IDS.MUSIC]
+      : []),
   ]);
   const seen = new Set<string>();
   return catalog.filter((action) => {

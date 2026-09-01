@@ -50,7 +50,7 @@ import {
   getAndalusianPrimaryCurriculumPack,
   type AndalusianPrimaryCurriculumCourse,
 } from "../services/andalusianPrimaryCurriculumService";
-import { applyAndalusianLanguageCurriculumDefaults } from "../services/andalusianLanguageCurriculumDefaultsService";
+import { applyAndalusianPrimaryCurriculumDefaults } from "../services/andalusianPrimaryCurriculumDefaultsService";
 import { getOrderedSubjectCatalog } from "../services/subjectCatalogService";
 import ActionIcon from "./ActionIcon";
 
@@ -447,7 +447,7 @@ function StartStep({
         }
         return;
       }
-      const next = applyAndalusianLanguageCurriculumDefaults(
+      const next = applyAndalusianPrimaryCurriculumDefaults(
         imported,
         officialCourse,
         actionCatalog,
@@ -477,7 +477,7 @@ function StartStep({
         )}
         <section className="rounded-3xl border-2 border-cyan-700 bg-cyan-50 p-5 shadow-sm">
           <div className="flex items-center gap-3"><span aria-hidden="true" className="text-3xl">🏛️</span><h4 className="text-2xl font-black text-[#173d70]">Andalucía · Primaria oficial</h4></div>
-          <p className="mt-2 font-semibold text-slate-600">Incluye todas las áreas oficiales aplicables al curso, con sus competencias, criterios, saberes y relaciones. Las propuestas revisadas de Lengua quedan activas.</p>
+          <p className="mt-2 font-semibold text-slate-600">Incluye todas las áreas oficiales aplicables al curso, con sus competencias, criterios, saberes y relaciones. Las propuestas observables revisadas quedan activas por defecto.</p>
           <label className="mt-4 block text-lg font-black text-[#173d70]">Curso
             <select value={officialCourse} disabled={isSaving || state !== null} onChange={(event) => setOfficialCourse(event.target.value === "" ? "" : Number(event.target.value) as AndalusianPrimaryCurriculumCourse)} className="mt-2 w-full rounded-xl border border-cyan-800/30 bg-white px-4 py-3 text-lg font-bold outline-none focus:border-cyan-600 focus:ring-4 focus:ring-cyan-200 disabled:opacity-55">
               <option value="">Selecciona el curso</option>

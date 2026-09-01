@@ -7968,7 +7968,7 @@ export const ANDALUSIAN_PRIMARY_CURRICULUM_SOURCE = {
           {
             "code": "4.1",
             "competenceCode": "4",
-            "text": "Gestionar equilibradamente pensamientos, sentimientos y emociones, y desarrollar una actitud de estima y cuidado de sí mismo o sí misma, de los demás y del entorno, identificando, analizando y expresando de manera asertiva las propias emocio-",
+            "text": "Gestionar equilibradamente pensamientos, sentimientos y emociones, y desarrollar una actitud de estima y cuidado de sí mismo o sí misma, de los demás y del entorno, identificando, analizando y expresando de manera asertiva las propias emociones y afectos, y reconociendo y valorando los de otras personas, en distintos contextos y en relación con actividades creativas y de reflexión individual o dialogada sobre cuestiones éticas y cívicas.",
             "knowledgeCodes": [
               "VCE.3.A.3",
               "VCE.3.B.1",

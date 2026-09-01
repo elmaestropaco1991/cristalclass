@@ -8,6 +8,7 @@ const workspace = path.resolve(__dirname, "..");
 // Deliberately explicit: adding a similarly named file must never execute code implicitly,
 // and deleting/renaming a required legacy suite must fail this runner.
 const deterministicSuites = [
+  ["app/services/andalusianPrimaryCurriculumDefaultsDeterministicChecks.ts", "runAndalusianPrimaryCurriculumDefaultsDeterministicChecks"],
   ["app/services/andalusianPrimaryCurriculumDeterministicChecks.ts", "runAndalusianPrimaryCurriculumDeterministicChecks"],
   ["app/services/andalusianLanguageCurriculumDeterministicChecks.ts", "runAndalusianLanguageCurriculumDeterministicChecks"],
   ["app/services/actionCatalogDeterministicChecks.ts", "runActionCatalogDeterministicChecks"],

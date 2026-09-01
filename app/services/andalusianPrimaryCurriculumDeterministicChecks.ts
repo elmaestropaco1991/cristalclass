@@ -1,7 +1,7 @@
 import { ANDALUSIAN_PRIMARY_CURRICULUM_SOURCE } from "../data/andalusianPrimaryCurriculum.generated";
 import { actions } from "../data/actions";
 import { SUBJECT_IDS } from "../types/subject";
-import { applyAndalusianLanguageCurriculumDefaults } from "./andalusianLanguageCurriculumDefaultsService";
+import { applyAndalusianPrimaryCurriculumDefaults } from "./andalusianPrimaryCurriculumDefaultsService";
 import {
   confirmCurriculumAssistantImport,
   inspectCurriculumSubject,
@@ -25,7 +25,7 @@ export interface AndalusianPrimaryCurriculumDeterministicCheck {
   readonly passed: boolean;
 }
 
-const EXPECTED_SOURCE_FINGERPRINT = "q558s0eykfrm";
+const EXPECTED_SOURCE_FINGERPRINT = "bg28vmnnexja";
 
 export function runAndalusianPrimaryCurriculumDeterministicChecks():
 readonly AndalusianPrimaryCurriculumDeterministicCheck[] {
@@ -42,6 +42,15 @@ readonly AndalusianPrimaryCurriculumDeterministicCheck[] {
       createCurriculumDeterministicFingerprint(ANDALUSIAN_PRIMARY_CURRICULUM_SOURCE)
         === EXPECTED_SOURCE_FINGERPRINT
     ),
+    check("the Values page-break continuation is complete and literal", () => {
+      const criterion = courseSix.subjects
+        .find((subject) => subject.id === SUBJECT_IDS.CIVIC_VALUES)
+        ?.criteria.find((candidate) => candidate.externalCode === "4.1");
+      return criterion?.text.endsWith(
+        "reflexión individual o dialogada sobre cuestiones éticas y cívicas."
+      ) === true
+        && !criterion.text.includes("emocio-");
+    }),
     check("all six courses are built in pedagogical order", () =>
       packs.length === 6
       && packs.map((pack) => pack.course).join("|")
@@ -148,7 +157,7 @@ readonly AndalusianPrimaryCurriculumDeterministicCheck[] {
         ).status === "valid"
       )
     ),
-    check("the complete pack follows the audited assistant import and Language-default flow", () => {
+    check("the complete pack follows the audited assistant import and all-subject default flow", () => {
       const instant = "2026-08-31T12:00:00.000Z";
       const parsed = parseCurriculumPackJson(
         serializeCurriculumPackToJson(getAndalusianPrimaryCurriculumPack(4), instant)
@@ -163,13 +172,11 @@ readonly AndalusianPrimaryCurriculumDeterministicCheck[] {
         preview,
         instant
       );
-      const prepared = applyAndalusianLanguageCurriculumDefaults(imported, 4, actions, instant);
-      const language = prepared.catalog.pack?.subjects.find(
-        (subject) => subject.legacySubjectId === SUBJECT_IDS.LANGUAGE
-      );
+      const prepared = applyAndalusianPrimaryCurriculumDefaults(imported, 4, actions, instant);
       return prepared.catalog.pack?.subjects.length === 6
-        && prepared.profile?.selectedSubjectIds.join(",") === language?.id
-        && prepared.actionLinks.length === 5;
+        && prepared.profile?.selectedSubjectIds.length === 6
+        && prepared.actionLinks.length === 21
+        && prepared.profile.ordinaryTracking.rules.length === 5;
     }),
     check("officially unrelated Mathematics knowledge is an activation warning, not invented data", () => {
       const instant = "2026-08-31T12:00:00.000Z";

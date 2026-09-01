@@ -385,11 +385,23 @@ def extract_values(pdf: pdfplumber.PDF) -> dict[str, Any]:
         match = re.match(r"^(\d+\.\d+)\.\s*(.*)$", text)
         if not match:
             raise RuntimeError(f"Invalid VCE criterion text: {text[:80]}")
+        criterion_code = match.group(1)
+        criterion_text = match.group(2)
+        # The last ruled cell ends at the printed page break after "emocio-".
+        # The authenticated CVE continues the same 4.1 sentence on the next
+        # page. Pin the literal continuation instead of publishing a truncated
+        # official criterion or trying to infer arbitrary prose.
+        if criterion_code == "4.1" and criterion_text.endswith("propias emocio-"):
+            criterion_text = criterion_text[:-len("emocio-")] + (
+                "emociones y afectos, y reconociendo y valorando los de otras personas, "
+                "en distintos contextos y en relación con actividades creativas y de "
+                "reflexión individual o dialogada sobre cuestiones éticas y cívicas."
+            )
         criteria.append(
             {
-                "code": match.group(1),
+                "code": criterion_code,
                 "competenceCode": row["competenceCode"],
-                "text": match.group(2),
+                "text": criterion_text,
                 "knowledgeCodes": relation_codes(row["knowledgeCodes"], "VCE"),
             }
         )

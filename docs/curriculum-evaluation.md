@@ -41,14 +41,18 @@ cristalclass_curriculum_evaluation_v1:{classroomId codificado}
 
 La envoltura contiene versión, clase, revisión optimista, estado, fecha de escritura y checksum determinista. Las lecturas no reparan ni reescriben valores. Una revisión obsoleta, un checksum divergente o un estado inválido bloquean la escritura. El límite actual es de 1.000.000 de unidades de código.
 
-## Reglas de Lengua ya preparadas
+## Reglas ordinarias ya preparadas
 
-Al activar el catálogo oficial de Lengua, el perfil guarda dos reglas ordinarias sin mínimo temporal inventado:
+Al preparar el curso oficial, el perfil activa todas las áreas aplicables. Lengua guarda dos reglas ordinarias sin mínimo temporal inventado:
 
 - respeto de turnos: positiva `Participa respetando los turnos de palabra`, contraria `Interrumpe mientras otra persona habla`;
 - atención durante intervenciones: positiva `Participa demostrando escucha activa`, contraria `No atiende durante una intervención`.
 
 Las relaciones curriculares se limitan al criterio `3.2` exacto del curso y mantienen cobertura parcial. La acción situacional de resolución dialogada se relaciona con `10.2`, pero no genera oportunidades por ausencia de conflictos.
+
+También se prepara una regla ordinaria revisada en Matemáticas, otra en Educación Física y otra por cada Lengua Extranjera disponible. Todas aplican la misma protección: la nota describe únicamente perseverancia, respeto de reglas o turnos de interacción, según corresponda. No se transforma en nota completa del criterio.
+
+Conocimiento del Medio, Educación Artística y Valores incluyen relaciones manuales para actividades o situaciones reales. No crean una nota por ausencia de pulsaciones, porque una sesión puede no haber ofrecido ninguna oportunidad de experimentar, colaborar, debatir o compartir una producción.
 
 ## Pendiente de integración
 

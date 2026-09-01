@@ -65,6 +65,11 @@ de puntuación necesarias para unir identidades publicadas de Lengua Extranjera:
 El origen y la identidad resuelta quedan incluidos en los datos generados y en
 las comprobaciones deterministas.
 
+El criterio `VCE 4.1` cruza un salto de página después de `emocio-`. El extractor
+une literalmente la continuación de la misma celda oficial y una prueba fija su
+final completo. De este modo la aplicación no publica como texto normativo una
+frase truncada por la geometría del PDF.
+
 La tabla de Matemáticas no publica `2.3.a` para 3.º, aunque sí publica `2.3.b`
 para 4.º. CristalClass conserva esa asimetría. Tampoco inventa relaciones para
 los cuatro saberes que aparecen en el catálogo pero no en ninguna relación de
@@ -77,6 +82,36 @@ las tablas:
 
 Se guardan con cero relaciones y se muestran como aviso, no como error de
 integridad ni como evidencia automática.
+
+## Propuestas observables activadas por defecto
+
+Al preparar un curso se seleccionan todas sus áreas oficiales. Las acciones son
+propuestas editables de CristalClass: no se presentan como texto normativo y su
+identidad estable no cambia cuando el docente modifica su nombre, icono o valor.
+
+El seguimiento ordinario por ausencia de incidencias se limita a relaciones
+directas que pueden observarse durante el uso habitual:
+
+- Lengua: turnos de palabra y atención durante intervenciones.
+- Matemáticas: perseverancia ante una dificultad.
+- Educación Física: respeto de una regla de juego acordada.
+- Primera Lengua Extranjera: turnos durante una interacción.
+- Segunda Lengua Extranjera, cuando corresponde: turnos durante una interacción.
+
+No se fija un número de días supuestamente científico. Desde la primera sesión
+válida se ofrece una nota provisional con el número real de sesiones y avisos de
+cobertura parcial. La ausencia de una incidencia informa únicamente del aspecto
+observable indicado, nunca del criterio completo.
+
+Las siguientes observaciones requieren que exista una actividad o situación y
+por eso se registran manualmente: seguridad en experimentos, acuerdos dialogados
+en Conocimiento del Medio, resolución de conflictos, trabajo cooperativo,
+producciones artísticas y actuaciones de Valores. Una clase sin pulsaciones no
+se convierte en una oportunidad inventada.
+
+`Toca la flauta sin permiso` y `Usa los materiales artísticos sin permiso` se
+incluyen como conductas de gestión diaria. No reciben relación curricular por el
+mero hecho de ocurrir en Música o Plástica.
 
 ## Regeneración
 

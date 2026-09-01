@@ -1,6 +1,7 @@
 import type { Action } from "../types/action";
 import { GENERAL_SUBJECT_ID } from "../types/subject";
 import { LANGUAGE_ACTIONS } from "./languageActions";
+import { PRIMARY_CURRICULUM_ACTIONS } from "./primaryCurriculumActions";
 
 const GENERAL_ACTION_CONTEXT = {
   subjectId: GENERAL_SUBJECT_ID,
@@ -108,4 +109,5 @@ export const actions: Action[] = [
     },
   },
   ...LANGUAGE_ACTIONS,
+  ...PRIMARY_CURRICULUM_ACTIONS,
 ];
