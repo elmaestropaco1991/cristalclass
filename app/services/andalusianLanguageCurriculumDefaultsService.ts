@@ -171,7 +171,10 @@ export function applyAndalusianLanguageCurriculumDefaults(
       status: "active",
       activeProfileId: profile.id,
     },
-    packs: [pack],
+    // Validate the reviewed Language defaults in isolation. A complete Primary
+    // pack can also contain official knowledge that the BOJA table leaves
+    // unrelated; those other areas are not modified by this operation.
+    packs: [{ ...pack, subjects: [subject] }],
     profiles: [nextProfile],
     actionLinks,
   };

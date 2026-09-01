@@ -8,6 +8,7 @@ const workspace = path.resolve(__dirname, "..");
 // Deliberately explicit: adding a similarly named file must never execute code implicitly,
 // and deleting/renaming a required legacy suite must fail this runner.
 const deterministicSuites = [
+  ["app/services/andalusianPrimaryCurriculumDeterministicChecks.ts", "runAndalusianPrimaryCurriculumDeterministicChecks"],
   ["app/services/andalusianLanguageCurriculumDeterministicChecks.ts", "runAndalusianLanguageCurriculumDeterministicChecks"],
   ["app/services/actionCatalogDeterministicChecks.ts", "runActionCatalogDeterministicChecks"],
   ["app/services/actionConfigurationDeterministicChecks.ts", "runActionConfigurationDeterministicChecks"],
@@ -125,8 +126,8 @@ function repositoryIsolationChecks() {
       passed: assistantSource.includes('event.currentTarget.value = ""'),
     },
     {
-      name: "the bundled Andalusian Language catalog uses the strict preview and import path",
-      passed: assistantSource.includes("getAndalusianLanguageCurriculumPack")
+      name: "the bundled Andalusian Primary catalog uses the strict preview and import path",
+      passed: assistantSource.includes("getAndalusianPrimaryCurriculumPack")
         && assistantSource.includes("serializeCurriculumPackToJson(pack, occurredAt")
         && assistantSource.includes("previewCurriculumAssistantImport(classroomId, parsed)"),
     },

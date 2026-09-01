@@ -1096,13 +1096,9 @@ function inspectBasicKnowledge(
     `${path}.criterionIds`,
     limitIssues
   );
-  if (value.criterionIds.length === 0) {
-    referenceIssues.push(issue(
-      "broken-reference",
-      `${path}.criterionIds`,
-      "Basic knowledge must reference at least one criterion."
-    ));
-  }
+  // An empty array is meaningful: an external source can publish a knowledge
+  // item without linking it in its criterion table. Broken or cross-subject
+  // identities below remain invalid; absence itself is preserved faithfully.
   const seen = new Set<string>();
   value.criterionIds.forEach((criterionId, criterionIndex) => {
     const criterionPath = `${path}.criterionIds[${criterionIndex}]`;

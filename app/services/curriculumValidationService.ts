@@ -296,7 +296,8 @@ function validateCurriculumDataInternal(
           issues.push(issue(
             "missing-criterion-reference",
             `${knowledgePath}.criterionIds`,
-            "Basic knowledge must reference at least one criterion."
+            "Basic knowledge has no criterion relation in this catalog.",
+            "warning"
           ));
         }
 
