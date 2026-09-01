@@ -1197,7 +1197,7 @@ function createProfile(
     provenance: { kind: "manual" },
     status: "configured",
     selectedSubjectIds: [],
-    ordinaryTracking: { enabled: false, minimumSessionDurationMinutes: 15, rules: [] },
+    ordinaryTracking: { enabled: true, minimumSessionDurationMinutes: 0, rules: [] },
     createdAt: occurredAt,
     updatedAt: occurredAt,
   };

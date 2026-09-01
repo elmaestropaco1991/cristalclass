@@ -17,6 +17,7 @@ const deterministicSuites = [
   ["app/services/chestOpeningLifecycleDeterministicChecks.ts", "runChestOpeningLifecycleDeterministicChecks"],
   ["app/services/curriculumCatalogEditorDeterministicChecks.ts", "runCurriculumCatalogEditorDeterministicChecks"],
   ["app/services/curriculumAssistantDeterministicChecks.ts", "runCurriculumAssistantDeterministicChecks"],
+  ["app/services/curriculumEvaluationDeterministicChecks.ts", "runCurriculumEvaluationDeterministicChecks"],
   ["app/services/curriculumMigrationDeterministicChecks.ts", "runCurriculumMigrationDeterministicChecks"],
   ["app/services/curriculumPackImportDeterministicChecks.ts", "runCurriculumPackImportDeterministicChecks"],
   ["app/services/curriculumStorageDeterministicChecks.ts", "runCurriculumStorageDeterministicChecks"],

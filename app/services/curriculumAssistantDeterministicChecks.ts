@@ -78,6 +78,12 @@ export async function runCurriculumAssistantDeterministicChecks(): Promise<reado
         && state.catalog.pack?.subjects.length === 0
         && state.wizardStep === 2;
     }),
+    check("ordinary observation is prepared by default without an invented duration threshold", () => {
+      const state = createManualCurriculumAssistantState(CLASSROOM_ID, INSTANT);
+      return state.profile?.ordinaryTracking.enabled === true
+        && state.profile.ordinaryTracking.minimumSessionDurationMinutes === 0
+        && state.profile.ordinaryTracking.rules.length === 0;
+    }),
     check("closing without starting leaves storage empty", () => {
       const storage = memoryStorage();
       readCurriculumAssistantState(storage, CLASSROOM_ID);

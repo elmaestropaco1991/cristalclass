@@ -67,6 +67,10 @@ Un fallo conocido sin escritura conserva el candidato solo en memoria y ofrece u
 
 El borrador admite como máximo 750.000 code units. Antes de escribir también se suma el valor curricular preexistente y se aplica el presupuesto conjunto de 1.250.000 code units ya reservado para currículo. No se trunca, compacta o elimina contenido al superar el límite.
 
+## Evaluación posterior
+
+El motor de evaluación vive separado del asistente y se documenta en `docs/curriculum-evaluation.md`. El asistente prepara el seguimiento ordinario como activado por defecto y sin un mínimo temporal inventado, pero no crea sesiones ni notas por sí mismo. Una asignatura debe estar realmente activa y una sesión debe cerrarse explícitamente antes de que el motor pueda calcular un resultado.
+
 ## Límites deliberados
 
 - El legado v1 queda pendiente; esta fase no incorpora una pantalla de migración de competencias.
