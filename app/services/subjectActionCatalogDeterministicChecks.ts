@@ -73,7 +73,7 @@ export async function runSubjectActionCatalogDeterministicChecks(): Promise<
       const ids = orderedSubjects.map((subject) => subject.id);
       const orders = orderedSubjects.map((subject) => subject.order);
 
-      return ids.length === 7
+      return ids.length === 12
         && new Set(ids).size === ids.length
         && ids.every(isSubjectId)
         && orders.every((order, index) => index === 0 || order > orders[index - 1]);

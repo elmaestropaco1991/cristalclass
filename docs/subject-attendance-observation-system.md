@@ -392,7 +392,7 @@ Los catálogos por comunidad, etapa, curso o asignatura son paquetes versionados
 
 ### 6.2 Catálogo provisional actual
 
-El catálogo fijo de General, Lengua, Matemáticas, Conocimiento del Medio, Inglés, Música y Educación Artística pertenece a las fases 1 y 2. Es provisional:
+El catálogo operativo contiene General, Lengua, Matemáticas, Conocimiento del Medio, Educación Física, Inglés, Segunda Lengua Extranjera, Música, Plástica, Valores Cívicos y Éticos, Religión y Atención Educativa. Música y Plástica son contextos diarios distintos, aunque ambos deberán resolver el área oficial Educación Artística. Religión y Atención Educativa son opcionales y no se activan como currículo del Anexo II por simple presencia en el catálogo.
 
 - sus identificadores existentes se conservan;
 - las acciones ya asignadas continúan funcionando;
