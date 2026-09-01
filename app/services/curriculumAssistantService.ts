@@ -1126,9 +1126,9 @@ function createEditableStateFromImportedPack(
     packageVersion: manualVersion,
     provenance: {
       kind: "manual",
-      sourceId: importedPack.id,
+      sourceId: importedPack.provenance.sourceId ?? importedPack.id,
       sourceVersion: importedPack.packageVersion,
-      label: "Borrador importado",
+      label: importedPack.provenance.label ?? "Borrador importado",
     },
     createdAt: occurredAt,
     updatedAt: occurredAt,

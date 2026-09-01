@@ -71,6 +71,12 @@ El borrador admite como máximo 750.000 code units. Antes de escribir también s
 
 El motor de evaluación vive separado del asistente y se documenta en `docs/curriculum-evaluation.md`. El asistente prepara el seguimiento ordinario como activado por defecto y sin un mínimo temporal inventado, pero no crea sesiones ni notas por sí mismo. Una asignatura debe estar realmente activa y una sesión debe cerrarse explícitamente antes de que el motor pueda calcular un resultado.
 
+## Catálogo oficial incluido de Lengua
+
+El asistente ofrece una entrada directa para los seis cursos de Lengua Castellana y Literatura de Educación Primaria en Andalucía. El docente selecciona el curso y se cargan las competencias, criterios, saberes y relaciones del Anexo II autenticado. La transcripción, la huella documental y su verificación se documentan en `docs/andalusian-language-curriculum.md`.
+
+La carga integrada utiliza el mismo analizador, vista previa e importador estricto que un archivo portable. Si ya existe un borrador, informa de la coincidencia o divergencia y nunca lo sobrescribe.
+
 ## Límites deliberados
 
 - El legado v1 queda pendiente; esta fase no incorpora una pantalla de migración de competencias.

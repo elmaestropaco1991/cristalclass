@@ -40,10 +40,16 @@ import {
 import {
   DEFAULT_CURRICULUM_PACK_JSON_LIMITS,
   parseCurriculumPackJson,
+  serializeCurriculumPackToJson,
   type CurriculumPackJsonLegacyResult,
   type CurriculumPackJsonValidResult,
 } from "../services/curriculumPackJsonService";
 import type { CurriculumPackImportPreview } from "../services/curriculumPackImportService";
+import {
+  ANDALUSIAN_LANGUAGE_CURRICULUM_COURSES,
+  getAndalusianLanguageCurriculumPack,
+  type AndalusianLanguageCurriculumCourse,
+} from "../services/andalusianLanguageCurriculumService";
 import { getOrderedSubjectCatalog } from "../services/subjectCatalogService";
 import ActionIcon from "./ActionIcon";
 
@@ -332,6 +338,7 @@ function StartStep({
   onCommit: (state: CurriculumAssistantState) => Promise<boolean>;
   onContinue: () => void;
 }) {
+  const [officialCourse, setOfficialCourse] = useState<AndalusianLanguageCurriculumCourse | "">("");
   const prepared = state?.catalog.pack?.subjects.filter(
     (subject) => !state.archivedSubjectIds.includes(subject.id)
   ).length ?? state?.legacyImport?.subjectCount ?? 0;
@@ -410,6 +417,41 @@ function StartStep({
     }
   };
 
+  const loadOfficialLanguagePack = async () => {
+    if (officialCourse === "") return;
+    onAnalysis(null);
+    onMessage("", false);
+    const occurredAt = new Date().toISOString();
+    try {
+      const pack = getAndalusianLanguageCurriculumPack(officialCourse);
+      const parsed = parseCurriculumPackJson(
+        serializeCurriculumPackToJson(pack, occurredAt, { exporterVersion: "cristalclass-bundled-v1" })
+      );
+      if (parsed.status !== "valid") {
+        throw new Error("El catálogo oficial incluido no ha superado su verificación interna.");
+      }
+      const preview = previewCurriculumAssistantImport(classroomId, parsed);
+      if (!preview.canApply) {
+        throw new Error("El catálogo oficial necesita resolver un bloqueo antes de incorporarse.");
+      }
+      const next = confirmCurriculumAssistantImport(classroomId, preview, occurredAt);
+      if (state) {
+        if (classifyCurriculumAssistantImportRepeat(state, next) === "idempotent") {
+          onMessage("Este curso de Lengua ya está incorporado. El borrador actual se conserva.", false);
+        } else {
+          onMessage("Ya existe otro borrador. No se ha sobrescrito con el catálogo oficial.", true);
+        }
+        return;
+      }
+      const committed = await onCommit(next);
+      if (!committed) {
+        onMessage("El catálogo sigue preparado, pero no se pudo confirmar su guardado.", true);
+      }
+    } catch (error) {
+      onMessage(error instanceof Error ? error.message : "No se pudo cargar el catálogo oficial.", true);
+    }
+  };
+
   return (
     <div className="mx-auto max-w-5xl">
       <h3 className="text-3xl font-black text-[#173d70]">¿Cómo quieres empezar?</h3>
@@ -423,6 +465,20 @@ function StartStep({
             <p className="mt-1 text-sm">Último cambio: {formatInformativeDate(state.updatedAt)}</p>
           </OptionCard>
         )}
+        <section className="rounded-3xl border-2 border-cyan-700 bg-cyan-50 p-5 shadow-sm">
+          <div className="flex items-center gap-3"><span aria-hidden="true" className="text-3xl">🏛️</span><h4 className="text-2xl font-black text-[#173d70]">Andalucía · Lengua oficial</h4></div>
+          <p className="mt-2 font-semibold text-slate-600">Incluye las 10 competencias, los 22 criterios del curso, todos los saberes del ciclo y sus relaciones oficiales.</p>
+          <label className="mt-4 block text-lg font-black text-[#173d70]">Curso
+            <select value={officialCourse} disabled={isSaving || state !== null} onChange={(event) => setOfficialCourse(event.target.value === "" ? "" : Number(event.target.value) as AndalusianLanguageCurriculumCourse)} className="mt-2 w-full rounded-xl border border-cyan-800/30 bg-white px-4 py-3 text-lg font-bold outline-none focus:border-cyan-600 focus:ring-4 focus:ring-cyan-200 disabled:opacity-55">
+              <option value="">Selecciona el curso</option>
+              {ANDALUSIAN_LANGUAGE_CURRICULUM_COURSES.map((course) => <option key={course} value={course}>{course}.º de Primaria</option>)}
+            </select>
+          </label>
+          <button type="button" onClick={() => void loadOfficialLanguagePack()} disabled={officialCourse === "" || isSaving || state !== null} className="mt-4 min-h-12 w-full rounded-xl bg-[#173d70] px-4 font-black text-white disabled:cursor-not-allowed disabled:opacity-45 focus-visible:outline-4 focus-visible:outline-cyan-400">
+            Cargar Lengua completa
+          </button>
+          <p className="mt-3 text-sm font-semibold text-cyan-900">Fuente verificada: Orden de 30 de mayo de 2023 · BOJA 104 · CVE 00284747.</p>
+        </section>
         <section className="rounded-3xl border border-cyan-900/15 bg-white/80 p-5 shadow-sm">
           <div className="flex items-center gap-3"><span aria-hidden="true" className="text-3xl">⇧</span><h4 className="text-2xl font-black text-[#173d70]">Importar un archivo curricular</h4></div>
           <p className="mt-2 font-semibold text-slate-600">Se analizará antes de guardar. Nada cambia hasta que confirmes.</p>
