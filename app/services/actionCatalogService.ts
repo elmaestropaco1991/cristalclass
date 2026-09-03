@@ -85,16 +85,14 @@ export function updateActionPoints(
   points: number
 ): Action[] {
   validatePoints(points);
-  return updateAction(catalog, actionId, (action) => {
-    return {
-      ...action,
+  return updateAction(catalog, actionId, (action) => ({
+    ...action,
+    points,
+    trackOrdinaryCompliance: normalizeOrdinaryComplianceTracking(
       points,
-      trackOrdinaryCompliance: normalizeOrdinaryComplianceTracking(
-        points,
-        action.trackOrdinaryCompliance
-      ),
-    };
-  });
+      action.trackOrdinaryCompliance
+    ),
+  }));
 }
 
 export function updateActionIcon(
@@ -110,6 +108,7 @@ export function updateActionIcon(
   }));
 }
 
+/** Quick positions are unique inside each subject, not across the whole catalog. */
 export function assignQuickActionSlot(
   catalog: readonly Action[],
   actionId: ActionType,
@@ -123,15 +122,16 @@ export function assignQuickActionSlot(
   }
 
   return catalog.map((current) => {
-    if (current.id === actionId) {
-      return { ...current, quickSlot };
-    }
+    if (current.id === actionId) return { ...current, quickSlot };
 
-    return current.quickSlot === quickSlot ? { ...current, quickSlot: null } : current;
+    const sameSubject = current.subjectId === action.subjectId;
+    return sameSubject && current.quickSlot === quickSlot
+      ? { ...current, quickSlot: null }
+      : current;
   });
 }
 
-/** Moves a quick action atomically. Moving one quick action onto another swaps them. */
+/** Moves a quick action inside its own subject. Moving onto another quick action swaps them. */
 export function moveActionQuickSlot(
   catalog: readonly Action[],
   actionId: ActionType,
@@ -148,13 +148,15 @@ export function moveActionQuickSlot(
   }
 
   validateQuickSlot(quickSlot);
-  const occupant = catalog.find((current) => current.id !== actionId && current.quickSlot === quickSlot);
+  const occupant = catalog.find((current) =>
+    current.id !== actionId
+    && current.subjectId === action.subjectId
+    && current.quickSlot === quickSlot
+  );
 
   return catalog.map((current) => {
     if (current.id === actionId) return { ...current, quickSlot };
-    if (current.id === occupant?.id) {
-      return { ...current, quickSlot: action.quickSlot };
-    }
+    if (current.id === occupant?.id) return { ...current, quickSlot: action.quickSlot };
     return current;
   });
 }
@@ -222,10 +224,12 @@ export function restoreAction(catalog: readonly Action[], actionId: ActionType):
 }
 
 export function normalizeActionCatalog(catalog: readonly Action[]): Action[] {
-  const occupiedSlots = new Set<QuickActionSlot>();
+  const occupiedSlotsBySubject = new Map<SubjectId, Set<QuickActionSlot>>();
 
   return catalog.map((action) => {
     const archived = Boolean(action.archived);
+    const context = normalizeActionContext(action);
+    const occupiedSlots = occupiedSlotsBySubject.get(context.subjectId) ?? new Set<QuickActionSlot>();
     const quickSlot = archived || action.quickSlot === null || !isQuickActionSlot(action.quickSlot)
       ? null
       : occupiedSlots.has(action.quickSlot)
@@ -234,9 +238,8 @@ export function normalizeActionCatalog(catalog: readonly Action[]): Action[] {
 
     if (quickSlot !== null) {
       occupiedSlots.add(quickSlot);
+      occupiedSlotsBySubject.set(context.subjectId, occupiedSlots);
     }
-
-    const context = normalizeActionContext(action);
 
     return {
       ...action,
