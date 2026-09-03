@@ -4,6 +4,7 @@ import {
   archiveAction,
   assignQuickActionSlot,
   createAction,
+  moveActionQuickSlot,
   removeQuickActionSlot,
   restoreAction,
   updateActionIcon,
@@ -37,6 +38,13 @@ export function changeConfiguredActionIcon(
 
 export function assignConfiguredQuickSlot(actionId: ActionType, quickSlot: QuickActionSlot): Action[] {
   return persist((catalog) => assignQuickActionSlot(catalog, actionId, quickSlot));
+}
+
+export function moveConfiguredQuickSlot(
+  actionId: ActionType,
+  quickSlot: QuickActionSlot | null
+): Action[] {
+  return persist((catalog) => moveActionQuickSlot(catalog, actionId, quickSlot));
 }
 
 export function removeConfiguredQuickSlot(actionId: ActionType): Action[] {
