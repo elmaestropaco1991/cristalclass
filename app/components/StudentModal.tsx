@@ -31,6 +31,7 @@ import ChestOpeningVideo, {
   preloadChestOpeningVideo,
   type ChestOpeningVideoHandle,
 } from "./ChestOpeningVideo";
+import QuickActionsEditor from "./QuickActionsEditor";
 import StudentCollectionScreen from "./StudentCollectionScreen";
 import StudentChestScreen from "./StudentChestScreen";
 import StudentInfo from "./StudentInfo";
@@ -53,6 +54,7 @@ type Props = {
 
 export default function StudentModal({ alumno, movements, soundEnabled, onSoundEnabledChange, actionsDisabled, studentIsAbsent, activeSubjectId, onCerrar, onAccion, onActionAppliedSuccessfully, onStudentUpdated }: Props) {
   const [additionalActionsOpen, setAdditionalActionsOpen] = useState(false);
+  const [quickActionsEditorOpen, setQuickActionsEditorOpen] = useState(false);
   const [coleccionAbierta, setColeccionAbierta] = useState(false);
   const [cofreAbierto, setCofreAbierto] = useState(false);
   const [chestOpeningVideoOpen, setChestOpeningVideoOpen] = useState(false);
@@ -173,7 +175,7 @@ export default function StudentModal({ alumno, movements, soundEnabled, onSoundE
         aria-modal="true"
         aria-label={`Ficha de ${alumno.nombre}`}
         onClick={(event) => event.stopPropagation()}
-        style={{ fontFamily: '"Trebuchet MS", "Avenir Next", Arial, sans-serif' }}
+        style={{ fontFamily: '\"Trebuchet MS\", \"Avenir Next\", Arial, sans-serif' }}
         className="relative h-[min(94vh,1125px)] w-auto max-w-[96vw] aspect-[4/3] overflow-hidden rounded-[32px] bg-[#c8e7ee] shadow-2xl sm:rounded-[48px]"
       >
         <StudentBackdrop />
@@ -194,6 +196,15 @@ export default function StudentModal({ alumno, movements, soundEnabled, onSoundE
           className="absolute right-[4.5%] top-[5%] z-30 flex h-[clamp(3.3rem,5vw,5rem)] w-[clamp(3.3rem,5vw,5rem)] items-center justify-center rounded-full border border-white/95 bg-gradient-to-br from-[#fffdf5] to-[#e8f5fb] text-[clamp(2.5rem,4.15vw,4.15rem)] font-light leading-none text-[#173d70] shadow-[0_5px_12px_rgba(23,61,112,.2),inset_0_1px_2px_rgba(255,255,255,.9)] transition active:scale-[.97] motion-reduce:transition-none focus-visible:outline-4 focus-visible:outline-cyan-400"
         >
           ×
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setQuickActionsEditorOpen(true)}
+          aria-label="Editar las acciones rápidas"
+          className="absolute left-1/2 top-[4.6%] z-30 -translate-x-1/2 rounded-full border border-white/90 bg-[#fffdf5]/90 px-[clamp(.8rem,1.5vw,1.4rem)] py-[clamp(.35rem,.65vw,.6rem)] text-[clamp(.72rem,1.05vw,1.08rem)] font-black text-[#173d70] shadow-[0_4px_12px_rgba(23,61,112,.16),inset_0_1px_2px_rgba(255,255,255,.95)] backdrop-blur transition active:scale-[.98] focus-visible:outline-4 focus-visible:outline-cyan-400"
+        >
+          Acciones rápidas <span aria-hidden="true" className="mx-1 text-[#316386]">·</span> Editar <span aria-hidden="true">✎</span>
         </button>
 
         {pendingChestCount > 0 && !chestFlowActive && (
@@ -266,6 +277,15 @@ export default function StudentModal({ alumno, movements, soundEnabled, onSoundE
             +
           </span>
         </button>
+
+        {quickActionsEditorOpen && (
+          <QuickActionsEditor
+            activeSubjectId={activeSubjectId}
+            operationalCatalog={visibleActionCatalog}
+            onCatalogChange={setActionCatalog}
+            onClose={() => setQuickActionsEditorOpen(false)}
+          />
+        )}
 
         {additionalActionsOpen && (
           <AdditionalActionsPanel
